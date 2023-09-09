@@ -1,0 +1,374 @@
+#!/usr/bin/env perl -w
+#
+# rm2-template-bowling
+# John Simpson <jms1@jms1.net> 2023-08-08
+#
+# Create reMarkable 2 templates for scoring bowling games
+#
+###############################################################################
+#
+# The MIT License (MIT)
+#
+# Copyright (C) 2023 John Simpson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+require 5.005 ;
+use strict ;
+use warnings ;
+
+use GD ;
+use GD::Text::Align ;
+use Getopt::Std ;
+
+########################################
+# reMarkable 2 screen attributes
+
+my $rm2_page_w      = 1404 ;            # page width
+my $rm2_page_h      = 1872 ;            # page height
+
+########################################
+# Margins and other attributes
+
+my $menu_w          = 104 ;             # width of menu and close button areas
+my $topbar_h        = 104 ;             # height of title area
+
+my $gl_h            = 30 ;              # group - label row height
+my $gp_h            = 90 ;              # group - player row height
+my $padding         = 20 ;              # blank space around/between games
+
+my $title           = 'Bowling Scores' ;
+my $font_file       = "$ENV{'HOME'}/Library/Fonts/LiberationSans-Regular.ttf" ;
+my $title_size      = 48 ;
+my $label_size      = 12 ;
+
+########################################
+# Other globals
+
+my %opt         = () ;                  # getopts()
+my $lh          = 0 ;                   # -l    left handed (menu on right)
+my $outfile     = 'Bowling.png' ;       # -o:   output filename
+my $ppg         = 4 ;                   # -p:   players per game
+
+my $white       = undef ;
+my $grey25      = undef ;
+my $grey50      = undef ;
+my $grey75      = undef ;
+my $black       = undef ;
+
+###############################################################################
+#
+# Usage
+
+sub usage(;$)
+{
+    my $msg = ( shift || '' ) ;
+
+    print <<EOF ;
+$0 [options]
+
+Create a reMarkable 2 template for a simple monthly calendar.
+
+-l or -r    Left- or Right-handed. Default is Right-handed.
+
+-o ___      Specify the name of the file to write. Default is 'Bowling.png'.
+
+-p ___      Players per game. Default is 4.
+
+-h          Show this help message.
+
+EOF
+
+    if ( $msg ne '' )
+    {
+        print $msg ;
+        exit 1 ;
+    }
+
+    exit 0 ;
+}
+
+###############################################################################
+#
+# Function to position a string around a point
+
+sub place_text($$$$$$$$)
+{
+    my $img     = shift ;
+    my $tx      = shift ;
+    my $ty      = shift ;
+    my $valign  = shift ;
+    my $halign  = shift ;
+    my $size    = shift ;
+    my $text    = shift ;
+    my $colour  = shift ;
+
+    ########################################
+    # Calculate real position for text
+
+    my $a = GD::Text::Align->new( $img ,
+        'valign' => $valign ,
+        'halign' => $halign ,
+    ) ;
+    $a->set_font( $font_file , $size ) ;
+    $a->set_text( $text ) ;
+
+    my @b = $a->bounding_box( $tx , $ty , 0 ) ;
+
+    ########################################
+    # Add the text to the image
+    # - (x,y) should be lower left corner
+
+    $img->stringFT( $colour , $font_file , $size , 0 , $b[0] , $b[1] , $text ) ;
+}
+
+###############################################################################
+#
+# Add a row of labels
+
+sub addrow_labels($$$$$)
+{
+    my $img     = shift ;
+    my $rlx     = shift ;   # row left x
+    my $rty     = shift ;   # top top y
+    my $rrx     = shift ;   # row right x
+    my $rby     = shift ;   # row bottom y
+
+    ########################################
+    # Calculate box sizes
+
+    my $fw      = int( ( $rrx - $rlx ) / 13.5 ) ;   # frame width
+    my $pw      = 2 * $fw ;                         # player width
+    my $ty      = $rty + ( $rby - $rty ) / 2 ;      # text y
+
+    ########################################
+    # Player
+
+    $img->setThickness( 1 ) ;
+    $img->filledRectangle( $rlx , $rty , $rlx+$pw , $rby , $grey75 ) ;
+    $img->rectangle( $rlx , $rty , $rlx+$pw , $rby , $black ) ;
+
+    my $tx = $rlx + ( $pw / 2 ) ;
+    place_text( $img , $tx , $ty , 'center' , 'center' , $label_size , 'Player' , $black ) ;
+
+    ########################################
+    # Frames
+
+    for my $n ( 0 .. 9 )
+    {
+        my $flx = $rlx + $pw + $n * $fw ;
+        my $frx = $flx + $fw ;
+
+        $img->filledRectangle( $flx , $rty , $frx , $rby , $grey75 ) ;
+        $img->rectangle( $flx , $rty , $frx , $rby , $black ) ;
+
+        $tx = $flx + ( $fw / 2 ) ;
+        place_text( $img , $tx , $ty , 'center' , 'center' , $label_size , $n+1 , $black ) ;
+    }
+
+    ########################################
+    # Total
+
+    my $tlx = $rlx + $pw + 10 * $fw ;
+
+    $img->filledRectangle( $tlx , $rty , $rrx , $rby , $grey75 ) ;
+    $img->rectangle( $tlx , $rty , $rrx , $rby , $black ) ;
+
+    $tx = $tlx + ( $rrx - $tlx ) / 2 ;
+    place_text( $img , $tx , $ty , 'center' , 'center' , $label_size , 'Total' , $black ) ;
+}
+
+###############################################################################
+#
+# Add a row of scoring boxes
+
+sub addrow_scores($$$$$)
+{
+    my $img     = shift ;
+    my $rlx     = shift ;   # row left x
+    my $rty     = shift ;   # top top y
+    my $rrx     = shift ;   # row right x
+    my $rby     = shift ;   # row bottom y
+
+    ########################################
+    # Calculate box sizes
+
+    my $fw      = int( ( $rrx - $rlx ) / 13.5 ) ;   # frame width
+    my $pw      = 2 * $fw ;                         # player width
+    my $sw      = int( $fw / 3 ) ;                  # sub-box width
+    my $sh      = $sw ;                             # sub-box height
+
+    ########################################
+    # Player
+
+    $img->setThickness( 1 ) ;
+    $img->rectangle( $rlx , $rty , $rlx+$pw , $rby , $black ) ;
+
+    ########################################
+    # Frames
+
+    for my $n ( 0 .. 9 )
+    {
+        ########################################
+        # Outer box
+
+        my $flx = $rlx + $pw + $n * $fw ;
+        my $frx = $flx + $fw ;
+
+        $img->rectangle( $flx , $rty , $frx , $rby , $black ) ;
+
+        ########################################
+        # Sub-boxes
+
+        $img->line( $flx +   $sw , $rty , $flx +   $sw , $rty + $sh , $black ) ;
+        $img->line( $flx + 2*$sw , $rty , $flx + 2*$sw , $rty + $sh , $black ) ;
+
+        my $bx = $flx + ( ( $n < 9 ) ? $sw : 0 ) ;
+
+        $img->line( $bx , $rty+$sh , $frx , $rty+$sh , $black ) ;
+    }
+
+    ########################################
+    # Total
+
+    my $tlx = $rlx + $pw + 10 * $fw ;
+
+    $img->rectangle( $tlx , $rty , $rrx , $rby , $black ) ;
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+
+getopts( 'hlro:p:' , \%opt ) ;
+$opt{'h'} && usage() ;
+$outfile = ( $opt{'o'} || $outfile ) ;
+$ppg     = ( $opt{'p'} || 4 ) ;
+
+########################################
+# Left or right handed?
+
+my $dal = $menu_w + $padding ;                  # drawing area left
+my $dar = $rm2_page_w - $padding ;              # drawing area right
+my $mal = 0 ;                                   # menu area left
+my $mar = $menu_w ;                             # menu area right
+my $msx = $mar ;                                # menu separator x
+my $cal = $rm2_page_w - $menu_w ;               # close area left
+my $car = $rm2_page_w - 1 ;                     # close area right
+my $csx = $cal ;                                # close separator x
+
+if ( $opt{'l'} )
+{
+    if ( $opt{'r'} )
+    {
+        usage( "ERROR: cannot use -l and -r together\n" ) ;
+    }
+
+    $dal = $padding ;                           # drawing area left
+    $dar = $rm2_page_w - $menu_w - $padding ;   # drawing area right
+    $mal = $rm2_page_w - $menu_w ;              # menu area left
+    $mar = $rm2_page_w - 1 ;                    # menu area right
+    $msx = $mal ;                               # menu separator x
+    $cal = 0 ;                                  # close area left
+    $car = $menu_w ;                            # close area right
+    $csx = $car ;                               # close separator x
+}
+
+###############################################################################
+#
+# Start the image
+
+my $img = new GD::Image( $rm2_page_w , $rm2_page_h ) ;
+
+########################################
+# Allocate colours - first colour is used as background
+
+$white  = $img->colorAllocate( 255 , 255 , 255 ) ;
+$grey75 = $img->colorAllocate( 192 , 192 , 192 ) ;
+$grey50 = $img->colorAllocate( 128 , 128 , 128 ) ;
+$grey25 = $img->colorAllocate(  64 ,  64 ,  64 ) ;
+$black  = $img->colorAllocate(   0 ,   0 ,   0 ) ;
+
+############################################################
+# Menu/title zones
+
+$img->setThickness( 1 ) ;
+
+########################################
+# Grey area under close button, top right/left
+# and line across top of page, bottom of title area
+
+$img->filledRectangle( $cal , 0 , $car , $topbar_h-1 , $grey75 ) ;
+$img->line( 0 , $topbar_h-1 , $rm2_page_w-1 , $topbar_h-1 , $black ) ;
+$img->line( $csx , 0 , $csx , $topbar_h-1 , $black ) ;
+
+########################################
+# Grey area under menu, on left/right, drawn *after* the line across
+# the top of page so it covers whichever end is appropriate
+
+$img->filledRectangle( $mal , 0 , $mar , $rm2_page_h-1 , $grey75 ) ;
+$img->line( $msx , 0 , $msx , $rm2_page_h-1 , $black ) ;
+
+########################################
+# Add title
+
+my $tx = int( $rm2_page_w / 2 ) ;
+my $ty = int( $topbar_h   / 2 ) ;
+place_text( $img , $tx , $ty , 'center' , 'center' , $title_size , $title , $black ) ;
+
+###############################################################################
+#
+# Add groups of rows
+
+my $y = $topbar_h + $padding ;
+
+while ( ( $y + $gl_h + $ppg * $gp_h ) < ( $rm2_page_h - $padding ) )
+{
+    ########################################
+    # Add the group's row of labels
+
+    addrow_labels( $img , $dal , $y , $dar , $y + $gl_h ) ;
+    $y += $gl_h ;
+
+    ########################################
+    # Add a row of score boxes for each player in the group
+
+    for my $n ( 1 .. $ppg )
+    {
+        addrow_scores( $img , $dal , $y , $dar , $y+$gp_h ) ;
+        $y += $gp_h ;
+    }
+
+    ########################################
+    # Padding between groups
+
+    $y += $padding ;
+}
+
+###############################################################################
+#
+# Write the output file
+
+open( O , '>' , $outfile )
+    or die "ERROR: can't create \"$outfile\": $!\n" ;
+binmode O ;
+print O $img->png() ;
+close O ;

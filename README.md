@@ -32,7 +32,7 @@ These scripts create "templates" which can be uploaded to a reMarkable tablet, a
 
     I started this as an exercise to teach myself how to use the Perl GD module, but it ended up being useful so I kept it.
 
-* `rm2-template-bowling` is another Perl-GD script I wrote. Somebody had asked a [question on Reddit](https://www.reddit.com/r/RemarkableTablet/comments/15l3a9p/screen_protector_and_templates/) about sports templates, and I was bored and figured "how hard could it be?", so I wrote this.
+* [`rm2-template-bowling`](rm2-template-bowling/) is another Perl-GD script I wrote. Somebody had asked a [question on Reddit](https://www.reddit.com/r/RemarkableTablet/comments/15l3a9p/screen_protector_and_templates/) about sports templates, and I was bored and figured "how hard could it be?", so I wrote this.
 
 ### Other Scripts
 
