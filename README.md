@@ -26,7 +26,7 @@ These scripts create "templates" which can be uploaded to a reMarkable tablet, a
 
 * [`rm2-template-cover`](rm2-template-cover/) is another shell script using[ImageMagick](https://imagemagick.org/), to generate a *very* simple "cover page" template. If you use this template for the first page of a notebook, and set the notebook to use the first page as its thumbnail, this makes a nice (but simple) cover page.
 
-* `rm2-template-calendar` is a Perl script which uses the [Perl GD module](https://metacpan.org/pod/GD), which uses the [GD library](https://libgd.github.io/), to generate a monthly calendar, in portrait or landscape mode, and with right-handed (with room for the menu bar on the left) or left-handed (with room for the menu bar on the right) options.
+* [`rm2-template-calendar`](rm2-template-calendar/) is a Perl script which uses the [Perl GD module](https://metacpan.org/pod/GD), which uses the [GD library](https://libgd.github.io/), to generate a monthly calendar, in portrait or landscape mode, and with right-handed (with room for the menu bar on the left) or left-handed (with room for the menu bar on the right) options.
 
     By default it generates a blank calendar which can be re-used for any month (if you don't mind writing the dates in), but it also has an option to include the dates for any `YYYY-MM` (if you don't mind the template only being usable for that one month).
 
