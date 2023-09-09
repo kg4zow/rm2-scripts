@@ -1,0 +1,78 @@
+#!/bin/bash
+#
+# rm2-template-cover
+# John Simpson <jms1@jms1.net> 2023-07-04
+#
+# Create a simple "cover page" template
+#
+# 2023-07-09 jms1 - renamed script
+
+########################################
+# Page dimensions
+#
+# These values are correct for reMarkable tablets, only change if you're
+# making a cover image to fit some other device.
+
+PAGE_W=1404
+PAGE_H=1872
+
+########################################
+# Background colour. This can be anything ImageMagick recognizes, you can run
+# "magick -list color" to see a list of pre-defined colour names.
+#
+# Examples: (these are all the same colour)
+# - "gray75"
+# - "#BFBFBF"
+# - "srgb(191,191,191)"
+
+PAGE_BG="gray75"
+
+########################################
+# Box outer dimensions and Y position.
+# - X will be calculated so the box is centered on the page.
+
+BOX_W=900
+BOX_H=400
+
+BOX_Y=300
+
+########################################
+# Calculate the boxes' corner positions.
+# - Each box will be "inside" the one before it.
+
+AX1=$(( ( PAGE_W - BOX_W ) / 2 ))
+AY1=$BOX_Y
+AX2=$(( AX1 + BOX_W ))
+AY2=$(( AY1 + BOX_H ))
+
+BX1=$(( AX1 + 3 ))
+BY1=$(( AY1 + 3 ))
+BX2=$(( AX2 - 3 ))
+BY2=$(( AY2 - 3 ))
+
+CX1=$(( BX1 + 2 ))
+CY1=$(( BY1 + 2 ))
+CX2=$(( BX2 - 2 ))
+CY2=$(( BY2 - 2 ))
+
+DX1=$(( CX1 + 1 ))
+DY1=$(( CY1 + 1 ))
+DX2=$(( CX2 - 1 ))
+DY2=$(( CY2 - 1 ))
+
+########################################
+# Do it
+
+rm -f cover-simple.png
+
+magick \
+    -type GrayScale -depth 8 -size "${PAGE_W}x${PAGE_H}" "xc:${PAGE_BG}" \
+    -fill black \
+    -draw "rectangle $AX1 $AY1 $AX2 $AY2" \
+    -fill $PAGE_BG \
+    -draw "rectangle $BX1 $BY1 $BX2 $BY2" \
+    -fill black \
+    -draw "rectangle $CX1 $CY1 $CX2 $CY2" \
+    -fill white \
+    -draw "rectangle $DX1 $DY1 $DX2 $DY2" \
+    cover-simple.png

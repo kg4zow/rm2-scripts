@@ -22,9 +22,9 @@ These scripts create "templates" which can be uploaded to a reMarkable tablet, a
 
 > Templates can also be stored as `.svg` files, and all of reMarkable's built-in templates have both `.png` and `.svg` versions. I'm not sure yet, but I *think* the `.svg` versions are somehow used to implement the [continuous pages](https://support.remarkable.com/s/article/How-to-use-continuous-pages) feature in the 3.0 firmware.
 
-* `rm2-template-basic` is a shell script which uses [ImageMagick](https://imagemagick.org/) to create a few simple templates. I thought it was cool because it provides a way to build images from scratch from a script.
+* [`rm2-template-basic`](rm2-template-basic/) is a shell script which uses [ImageMagick](https://imagemagick.org/) to create a few simple templates. I thought it was cool because it provides a way to build images from scratch from a script.
 
-* `rm2-template-cover` is another shell script using[ImageMagick](https://imagemagick.org/), to generate a *very* simple "cover page" template. If you use this template for the first page of a notebook, and set the notebook to use the first page as its thumbnail, this makes a nice (but simple) cover page.
+* [`rm2-template-cover`](rm2-template-cover/) is another shell script using[ImageMagick](https://imagemagick.org/), to generate a *very* simple "cover page" template. If you use this template for the first page of a notebook, and set the notebook to use the first page as its thumbnail, this makes a nice (but simple) cover page.
 
 * `rm2-template-calendar` is a Perl script which uses the [Perl GD module](https://metacpan.org/pod/GD), which uses the [GD library](https://libgd.github.io/), to generate a monthly calendar, in portrait or landscape mode, and with right-handed (with room for the menu bar on the left) or left-handed (with room for the menu bar on the right) options.
 
