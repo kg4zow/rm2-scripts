@@ -36,7 +36,7 @@ These scripts create "templates" which can be uploaded to a reMarkable tablet, a
 
 ### Other Scripts
 
-* `rm2-make-pdf` is a shell script which uses [Calibre](https://calibre-ebook.org/)'s `ebook-convert` command to convert an ebook (usually EPUB, but it'll work with any ebook format that Calibre can read) to a PDF with the settings (page size, font, font size, margins, etc.) that I think look good on a the reMarkable tablet. I do this because I don't think the PDFs that the reMarkable tablet produces when you upload an EPUB file, look all that great.
+* [`rm2-make-pdf`](rm2-make-pdf/) is a shell script which uses [Calibre](https://calibre-ebook.org/)'s `ebook-convert` command to convert an ebook (usually EPUB, but it'll work with any ebook format that Calibre can read) to a PDF with the settings (page size, font, font size, margins, etc.) that I think look good on a the reMarkable tablet. I do this because I don't think the PDFs that the reMarkable tablet produces when you upload an EPUB file, look all that great.
 
 ## Other sites
 

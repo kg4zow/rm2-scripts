@@ -1,0 +1,219 @@
+#!/bin/bash
+#
+# rm2-make-pdf
+# John Simpson <jms1@jms1.net> 2023-08-13
+#
+# Use Calibre's "ebook-convert" to convert an input file to a PDF, using
+# settings that I think look good on a reMarkable 2 tablet.
+#
+# Requirements:
+# - OS: macOS or Linux. This *might* also work on windows, if you install
+#   whatever "Linux-ish" things you need to run it on.
+# - Calibre.
+#   https://calibre-ebook.com/
+# - reMarkable tablet, or some other device or program to view the resulting
+#   PDF file with.
+#   https://remarkable.com/
+#
+# 2023-08-15 jms1 - fixed handling of title/author values containing spaces
+#
+# 2023-09-10 jms1 - show usage message if no input filename
+#
+###############################################################################
+#
+# The MIT License (MIT)
+#
+# Copyright (C) 2023 John Simpson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+########################################
+# Possible locations for the 'ebook-convert' executable. The first of these
+# which exists will be used.
+
+EBC_MAYBE="
+/Applications/calibre.app/Contents/MacOS/ebook-convert
+/opt/calibre/ebook-convert
+/usr/local/bin/ebook-convert
+/usr/bin/ebook-convert
+"
+
+###############################################################################
+#
+# usage
+
+function usage {
+    MSG="${1:-}"
+
+    cat <<EOF
+$0 [options] INFILE [OUTFILE]
+
+Use Calibre's 'ebook-convert' to convert an input file to a PDF, using
+settings that I think look good on a reMarkable 2 tablet.
+
+-t ___  Specify the title in the PDF's metadata.
+
+-a ___  Specify the author in the PDF's metadata.
+
+-s ___  Specify the document's base font size. Default is 12.
+
+-p      For input documents which have "H1" section headers (HTML, Markdown,
+        etc.) start a new page for each H1 section.
+
+If the input file has metadata, the '-t' and '-a' options will override the
+values from the input file.
+
+If OUTFILE is specified, it must end with '.pdf'.
+
+EOF
+
+    if [[ -n "$MSG" ]]
+    then
+        echo "$MSG"
+        exit 1
+    fi
+
+    exit 0
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+#
+# Process the command line
+
+SET_X=false
+TITLE=''
+AUTHOR=''
+SIZE='12'
+H1_NO_SPLIT=true
+
+while getopts ':hxt:a:s:p' OPT
+do
+    case $OPT in
+        h)  usage
+            ;;
+        x)  SET_X=true
+            ;;
+        t)  TITLE="$OPTARG"
+            ;;
+        a)  AUTHOR="$OPTARG"
+            ;;
+        s)  SIZE="$OPTARG"
+            ;;
+        p)  H1_NO_SPLIT=false
+            ;;
+        *)  usage "ERROR: unknown option '-$OPTARG'"
+            ;;
+    esac
+done
+shift $((OPTIND-1))
+
+########################################
+# Get the input filename
+
+INFILE="${1:-}"
+if [[ -z "$INFILE" ]]
+then
+    usage
+fi
+
+OUTFILE="${2:-.pdf}"
+if [[ ! "$OUTFILE" =~ \.pdf$ ]]
+then
+    usage "ERROR: output filename must end with '.pdf'"
+fi
+
+########################################
+# Find the 'ebook-convert' executable
+
+for X in $EBC_MAYBE
+do
+    if [[ -x "$X" ]]
+    then
+        EBOOK_CONVERT="$X"
+        continue
+    fi
+done
+
+if [[ -z "$EBOOK_CONVERT" ]]
+then
+    echo "ERROR: unable to locate 'ebook-convert' executable, cannot continue"
+    exit 1
+fi
+
+########################################
+# Build a string containing options which may or may not need to be included
+# in the final 'ebook-convert' command line.
+
+# Array of options
+OPTA=()
+
+if [[ -n "$TITLE" ]]
+then
+    OPTA+=( '--title' )
+    OPTA+=( "$TITLE" )
+fi
+
+if [[ -n "$AUTHOR" ]]
+then
+    OPTA+=( '--authors' )
+    OPTA+=( "$AUTHOR" )
+fi
+
+if $H1_NO_SPLIT
+then
+    OPTA+=( '--page-breaks-before' '/' )
+    OPTA+=( '--chapter' '/' )
+fi
+
+###############################################################################
+#
+# Do the deed
+#
+# 'ebook-convert' command line option reference:
+#   https://manual.calibre-ebook.com/generated/en/ebook-convert.html
+
+if $SET_X
+then
+    set -x
+fi
+
+"$EBOOK_CONVERT" "$INFILE" "$OUTFILE" \
+    --input-profile                 default \
+    --output-profile                generic_eink_hd \
+    --base-font-size                $SIZE \
+    --embed-all-fonts               \
+    --subset-embedded-fonts         \
+    --unsmarten-punctuation         \
+    "${OPTA[@]}"                    \
+    --custom-size                   1404x1872 \
+    --unit                          devicepixel \
+    --pdf-sans-family               'Liberation Sans' \
+    --pdf-serif-family              'Liberation Serif' \
+    --pdf-mono-family               'Liberation Mono' \
+    --pdf-standard-font             serif \
+    --pdf-mono-font-size            $SIZE \
+    --pdf-page-margin-left          72 \
+    --pdf-page-margin-right         18 \
+    --pdf-page-margin-top           18 \
+    --pdf-page-margin-bottom        18 \
+    --preserve-cover-aspect-ratio
