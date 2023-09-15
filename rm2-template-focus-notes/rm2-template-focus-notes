@@ -1,0 +1,61 @@
+#!/bin/bash
+#
+# rm2-template-focus-notes
+# John Simpson <jms1@jms1.net> 2023-09-14
+#
+# Programmatically create a PNG template for use as a reMarkable 2 template.
+#
+# ImageMagick: https://imagemagick.org/
+# Liberation Fonts: https://github.com/liberationfonts/liberation-fonts
+
+set -e
+
+magick \
+    -type GrayScale -depth 8 -size 1404x1872 'xc:white' \
+    -fill black \
+    -draw 'line 1000 ,   50 , 1403 ,   50' \
+    -draw 'line 1000 ,  100 , 1403 ,  100' \
+    \
+    -draw 'line    0 ,  120 , 1403 ,  120' \
+    -draw 'line  400 ,  120 ,  400 , 1620' \
+    -draw 'line    0 , 1620 , 1403 , 1620' \
+    \
+    -draw 'line  400 ,  170 , 1403 ,  170' \
+    -draw 'line  400 ,  220 , 1403 ,  220' \
+    -draw 'line  400 ,  270 , 1403 ,  270' \
+    -draw 'line  400 ,  320 , 1403 ,  320' \
+    -draw 'line  400 ,  370 , 1403 ,  370' \
+    -draw 'line  400 ,  420 , 1403 ,  420' \
+    -draw 'line  400 ,  470 , 1403 ,  470' \
+    -draw 'line  400 ,  520 , 1403 ,  520' \
+    -draw 'line  400 ,  570 , 1403 ,  570' \
+    -draw 'line  400 ,  620 , 1403 ,  620' \
+    -draw 'line  400 ,  670 , 1403 ,  670' \
+    -draw 'line  400 ,  720 , 1403 ,  720' \
+    -draw 'line  400 ,  770 , 1403 ,  770' \
+    -draw 'line  400 ,  820 , 1403 ,  820' \
+    -draw 'line  400 ,  870 , 1403 ,  870' \
+    -draw 'line  400 ,  920 , 1403 ,  920' \
+    -draw 'line  400 ,  970 , 1403 ,  970' \
+    -draw 'line  400 , 1020 , 1403 , 1020' \
+    -draw 'line  400 , 1070 , 1403 , 1070' \
+    -draw 'line  400 , 1120 , 1403 , 1120' \
+    -draw 'line  400 , 1170 , 1403 , 1170' \
+    -draw 'line  400 , 1220 , 1403 , 1220' \
+    -draw 'line  400 , 1270 , 1403 , 1270' \
+    -draw 'line  400 , 1320 , 1403 , 1320' \
+    -draw 'line  400 , 1370 , 1403 , 1370' \
+    -draw 'line  400 , 1420 , 1403 , 1420' \
+    -draw 'line  400 , 1470 , 1403 , 1470' \
+    -draw 'line  400 , 1520 , 1403 , 1520' \
+    -draw 'line  400 , 1570 , 1403 , 1570' \
+    \
+    -font 'Liberation-Sans' \
+    -pointsize 20 \
+    -draw 'text 940 ,   50 "DATE"' \
+    -draw 'text 895 ,  100 "PURPOSE"' \
+    -draw 'text   5 ,  140 "CUE COLUMN"' \
+    -draw 'text 405 ,  140 "NOTES"' \
+    -draw 'text   5 , 1640 "SUMMARY"' \
+    \
+    focusnotes.png

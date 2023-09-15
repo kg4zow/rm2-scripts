@@ -1,0 +1,45 @@
+#!/bin/bash
+#
+# generate
+# jms1 2023-07-09
+#
+# - Run the script to generate the template images
+# - Create small versions of each image, to show in the README.md file
+
+set -ex
+
+###############################################################################
+#
+# Create a small version of an image
+
+function make_small {
+    FILE="$1"
+    FILE_SM="${FILE%.png}-sm.png"
+
+    WORK="$( mktemp )"
+
+    ########################################
+    # Create a small version of the image
+
+    cp "$FILE" "$WORK"
+    mogrify -scale 20% "$WORK"
+
+    ########################################
+    # Add a black 1px border to the small image
+
+    magick "$WORK" \
+        -background black \
+        -gravity northwest -splice 1x1 \
+        -gravity southeast -splice 1x1 \
+        "$FILE_SM"
+
+    rm -f "$WORK"
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+
+./rm2-template-focus-notes
+
+make_small focusnotes.png
