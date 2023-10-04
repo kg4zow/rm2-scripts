@@ -1,0 +1,1894 @@
+#!/usr/bin/env perl -w
+#
+# rm2-cal
+# jms1 2023-08-01
+#
+# Generate calendar PDFs for reMarkable tablets.
+#
+# 2023-10-04 jms1 - final cleanup before "publishing" on Github.
+#
+###############################################################################
+#
+# The MIT License (MIT)
+#
+# Copyright (C) 2023 John Simpson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+require 5.005 ;
+use strict ;
+use warnings ;
+no warnings "recursion" ;
+use utf8 ;
+
+use Getopt::Std ;
+use PDF::API2 ;
+use POSIX qw ( strftime ) ;
+use Time::Local qw ( timegm_modern ) ;
+
+########################################
+# "Hard" configuration - dimensions of reMarkable screen
+# - cannot *currently* be overridden by config options
+
+my $page_w_px       = 1404 ;        # reMarkable 2 screen width, pixels
+my $page_h_px       = 1872 ;        # reMarkable 2 screen height, pixels
+my $page_dpi        =  226 ;        # reMarkable 2 dot pitch, pixels per inch
+
+########################################
+# getopts
+
+my %opt             = () ;
+my $config_file     = '' ;          # -c:   config file name
+
+########################################
+# Other globals
+
+my $outfile         = '' ;          # output filename
+my %cfg             = () ;          # config items from file
+my @want_pages      = () ;          # list of pages to generate
+my $font            = undef ;       # will be defined when program starts
+my %page_of         = () ;          # page number of each target
+my $links           = 1 ;           # generate cross-page links
+my $fail            = 0 ;           # error sets to non-zero
+
+###############################################################################
+#
+# usage
+
+sub usage(;$)
+{
+    my $msg = ( shift || '' ) ;
+
+    print <<EOF ;
+$0 [options] [...]
+
+Generate a PDF contianing one or more calendars. Each item on the command
+line can be one of the following:
+
+* output.pdf    Output filename (must end with '.pdf')
+* key=val       Config option
+* YYYY          One year page.
+* YYYY-MM       One month page.
+* YYYY-xx       One year page, plus 12 month pages.
+* YYYY-MM-DD    One day page.
+* YYYY-MM-xx    One month page, plus (28-31) day pages.
+* YYYY-xx-xx    One year page, plus 12 (month page plus (28-31) day pages).
+
+Pages and output filenames specified on the command line will override the
+config file.
+
+Options:
+
+-c ___  Specify a config file. This can be used to specify the font, sizes,
+        and whether or not cross-page links should be generated, as well as
+        the list of pages to be included.
+
+-g      Generate a sample config file. Save and edit this output to start a
+        new config file.
+
+-h      Show this help message.
+
+See https://github.com/kg4zow/rm2-scripts/rm2-cal/README.md for more detailed
+information.
+
+EOF
+
+    if ( $msg ne '' )
+    {
+        print $msg ;
+        exit 1 ;
+    }
+
+    exit 0 ;
+}
+
+###############################################################################
+#
+# Initialize config values
+
+sub init_config()
+{
+    %cfg = () ;
+
+    $cfg{ 'font_name'       } = 'Helvetica' ;
+    $cfg{ 'menu_width_px'   } = 104         ;
+    $cfg{ 'close_width_px'  } = 104         ;
+    $cfg{ 'margin_x_px'     } = 20          ;
+    $cfg{ 'margin_y_px'     } = 20          ;
+    $cfg{ 'header_ht_px'    } = 104         ;
+    $cfg{ 'links'           } = 1           ;
+    $cfg{ 'nav_link_size'   } = 8           ;
+
+    $cfg{ 'yr_title_size'   } = 20          ;
+    $cfg{ 'yr_mo_size'      } = 12          ;
+    $cfg{ 'yr_da_size'      } = 12          ;
+
+    $cfg{ 'mo_title_format' } = '%B %Y'     ;
+    $cfg{ 'mo_title_size'   } = 20          ;
+    $cfg{ 'mo_dw_size'      } = 10          ;
+    $cfg{ 'mo_da_size'      } = 12          ;
+    $cfg{ 'mo_sm_size'      } = 10          ;
+    $cfg{ 'mo_sd_size'      } = 10          ;
+
+    $cfg{ 'da_h1_format'    } = '%B %e, %Y' ;
+    $cfg{ 'da_h1_size'      } = 20          ;
+    $cfg{ 'da_h2_format'    } = '%A'        ;
+    $cfg{ 'da_h2_size'      } = 10          ;
+
+    $cfg{ 'da_type'         } = ''          ;
+    $cfg{ 'da_pitch'        } = 18          ;
+
+    $cfg{ 'da_mcal_pos'     } = ''          ;
+    $cfg{ 'da_mcal_h_pt'    } = 72          ;
+    $cfg{ 'da_mcal_w_pt'    } = 108         ;
+    $cfg{ 'da_mcal_tsize'   } = 10          ;
+    $cfg{ 'da_mcal_dsize'   } = 10          ;
+}
+
+###############################################################################
+#
+# Generate a sample config
+
+sub generate_config()
+{
+    init_config() ;
+
+    print <<EOF ;
+###############################################################################
+#
+# Sample config file. Produces a 2023 calendar.
+
+########################################
+# Settings for all pages
+
+font_name       = "$cfg{'font_name'}"
+menu_width_px   = $cfg{'menu_width_px'}
+close_width_px  = $cfg{'close_width_px'}
+margin_x_px     = $cfg{'margin_x_px'}
+margin_y_px     = $cfg{'margin_y_px'}
+header_ht_px    = $cfg{'header_ht_px'}
+links           = $cfg{'links'}
+nav_link_size   = $cfg{'nav_link_size'}
+
+########################################
+# Settings for "year" pages
+# - font size - title
+# - font size - month names
+# - font size - dates
+
+yr_title_size   = $cfg{'yr_title_size'}
+yr_mo_size      = $cfg{'yr_mo_size'}
+yr_da_size      = $cfg{'yr_da_size'}
+
+########################################
+# Settings for "month" pages
+# - strftime() format for month title
+# - font size - title
+# - font size - days of the week
+# - font size - dates
+# - font size - small calendars - month name
+# - font size - small calendars - dates
+
+mo_title_format = "$cfg{'mo_title_format'}"
+mo_title_size   = $cfg{'mo_title_size'}
+mo_dw_size      = $cfg{'mo_dw_size'}
+mo_da_size      = $cfg{'mo_da_size'}
+mo_sm_size      = $cfg{'mo_sm_size'}
+mo_sd_size      = $cfg{'mo_sd_size'}
+
+########################################
+# Settings for "day" pages
+#
+# - headers - strftime() format and font size for headers
+#   - h1 is lower line, default date
+#   - h2 is upper line, default day of week
+# - how to fill the bulk of the page ("lines", "dots", or "blank")
+# - for lines/dots, how far they should be from each other (points)
+# - small month calendar
+#   - position ("ne", "nw", "sw", "se") or none ("")
+#   - calendar height and width in points (72 points == 1 inch)
+#   - font sizes for month name and dates (which are also in points)
+
+da_h1_format    = "$cfg{'da_h1_format'}"
+da_h1_size      = $cfg{'da_h1_size'}
+da_h2_format    = "$cfg{'da_h2_format'}"
+da_h2_size      = $cfg{'da_h2_size'}
+
+da_type         = "$cfg{'da_type'}"
+da_pitch        = $cfg{'da_pitch'}
+
+da_mcal_pos     = $cfg{'da_mcal_pos'}
+da_mcal_h_pt    = $cfg{'da_mcal_h_pt'}
+da_mcal_w_pt    = $cfg{'da_mcal_w_pt'}
+da_mcal_tsize   = $cfg{'da_mcal_tsize'}
+da_mcal_dsize   = $cfg{'da_mcal_dsize'}
+
+########################################
+# List of pages to include in the PDF. If you don't include them here,
+# be sure to include them on the command line when you run the script.
+#
+# - YYYY            One year page.
+# - YYYY-MM         One month page.
+# - YYYY-xx         One year page, plus 12 month pages.
+# - YYYY-MM-DD      One day page.
+# - YYYY-MM-xx      One month page, plus (28-31) day pages.
+# - YYYY-xx-xx      One year page, plus 12 (month page plus (23-31) day pages).
+
+2023-xx-xx
+EOF
+
+    exit 0 ;
+}
+
+###############################################################################
+#
+# Number of days in a given YYYY-MM
+
+sub days_in($$)
+{
+    my $yr = shift ;
+    my $mo = shift ;
+
+    if ( $mo == 2 )
+    {
+           if ( $yr %   4 ) { return 28 ; }
+        elsif ( $yr % 100 ) { return 29 ; }
+        elsif ( $yr % 400 ) { return 28 ; }
+        else                { return 29 ; }
+    }
+    elsif ( ( $mo == 4 ) || ( $mo == 6 ) || ( $mo == 9 ) || ( $mo == 11 ) )
+    {
+        return 30 ;
+    }
+    else
+    {
+        return 31 ;
+    }
+}
+
+###############################################################################
+#
+# Validate page specs and add them to @want_pages, which is the list of pages
+# that need to be generated. See usage() for a list of valid page forms.
+#
+# All spec types support *ranges* of values, by specifying the first and last
+# value with a comma.
+
+sub add_want($)
+{
+    my $x = shift ;
+
+    ############################################################
+    # YEAR - spec can be
+    # - YYYY            single "year" page
+    # - YYYY,YYYY       multiple "year" pages
+
+    if ( $x =~ m|^(\d\d\d\d)(,(\d\d\d\d))?$| )
+    {
+        my ( $y1 , $y2 ) = ( $1 , $3 ) ;
+        $y2 ||= $y1 ;
+
+        for my $n ( $y1 .. $y2 )
+        {
+            push( @want_pages , $n ) ;
+        }
+    }
+
+    ############################################################
+    # MONTH - spec can be
+    # - YYYY-MM             single "month" page
+    # - YYYY-MM,YYYY-MM     multiple "month" pages
+    #                       - do not have to be in the same year
+
+    elsif ( $x =~ m|^(\d\d\d\d\-\d\d)(,(\d\d\d\d\-\d\d))?$| )
+    {
+        my ( $ym1 , $ym2 ) = ( $1 , $3 ) ;
+        $ym2 ||= $ym1 ;
+
+        my $ym = $ym1 ;
+        while ( $ym le $ym2 )
+        {
+            push( @want_pages , $ym ) ;
+            $ym = nextmo( $ym ) ;
+        }
+    }
+
+    ############################################################
+    # DATE - spec can be
+    # - YYYY-MM-DD              single "day" page
+    # - YYYY-MM-DD,YYYY-MM-DD   multiple "day" pages
+    #                           - can span months/years
+
+    elsif ( $x =~ m|^(\d\d\d\d\-\d\d\-\d\d)(,(\d\d\d\d\-\d\d\-\d\d))?$| )
+    {
+        my ( $ymd1 , $ymd2 ) = ( $1 , $3 ) ;
+        $ymd2 ||= $ymd1 ;
+
+        my $ymd = $ymd1 ;
+        while ( $ymd le $ymd2 )
+        {
+            push( @want_pages , $ymd ) ;
+            $ymd = nextda( $ymd ) ;
+        }
+    }
+
+    ############################################################
+    # YEAR PLUS ALL MONTHS - spec can be
+    # - YYYY-xx             year page plus twelve month pages
+    # - YYYY-xx,YYYY-xx     same for multiple years
+
+    elsif ( $x =~ m|^(\d\d\d\d)\-xx(,(\d\d\d\d)\-xx)?$| )
+    {
+        my ( $y1 , $y2 ) = ( $1 , $2 ) ;
+        $y2 ||= $y1 ;
+
+        my $y = $y1 ;
+        while ( $y <= $y2 )
+        {
+            push( @want_pages , sprintf( '%04d' , $y ) ) ;
+
+            for my $m ( 1 .. 12 )
+            {
+                push( @want_pages , sprintf( '%04d-%02d' , $y , $m ) ) ;
+            }
+
+            $y ++ ;
+        }
+    }
+
+    ############################################################
+    # MONTH PLUS ALL DAYS - spec can be
+    # - YYYY-MM-xx                  single "month" page with "day" pages
+    # - YYYY-MM-xx,YYYY-MM-xx       same for multiple months
+    #                               - do not have to be in the same year
+    #
+    # Example: "2023-09-xx,2023-10-xx" generates the following pages:
+    #   2023-09
+    #   2023-09-01
+    #   2023-09-02
+    #   ...
+    #   2023-09-30
+    #   2023-10
+    #   2023-10-01
+    #   2023-10-02
+    #   ...
+    #   2023-10-31
+
+    elsif ( $x =~ m|^(\d\d\d\d\-\d\d)\-xx(,(\d\d\d\d\-\d\d)\-xx)?$| )
+    {
+        my ( $ym1 , $ym2 ) = ( $1 , $3 ) ;
+        $ym2 ||= $ym1 ;
+
+        my $ymd1 = "$ym1-01" ;          # first date YYYY-MM-01
+        my $ymd2 = "$ym2-31" ;          # last  date YYYY-MM-31
+
+        my $lym  = '' ;                 # YYYY-MM of last date shown
+
+        ########################################
+        # Iterate through dates
+
+        my $ymd  = $ymd1 ;
+        while ( $ymd le $ymd2 )
+        {
+            ########################################
+            # If this date is a different month, add month page
+
+            $ymd =~ m|^(\d\d\d\d\-\d\d)| ;
+            my $tym = $1 ;
+            if ( $tym ne $lym )
+            {
+                push( @want_pages , $tym ) ;
+                $lym = $tym ;
+            }
+
+            ########################################
+            # Add the day page
+
+            push( @want_pages , $ymd ) ;
+            $ymd = nextda( $ymd ) ;
+        }
+    }
+
+    ############################################################
+    # YEAR PLUS ALL MONTHS PLUS ALL DAYS - spec can be
+    # - YYYY-xx-xx
+    # - YYYY-xx-xx,YYYY-xx-xx
+    #
+    # Adds the following:
+    # - YYYY
+    # - YYYY-01
+    # - YYYY-01-xx (i.e. all days)
+    # - YYYY-02
+    # - YYYY-02-xx (i.e. all days)
+    # - ...
+    # - YYYY-12
+    # - YYYY-12-xx (i.e. all days)
+
+    elsif ( $x =~ m|^(\d\d\d\d)\-xx\-xx(,(\d\d\d\d)\-xx\-xx)?$| )
+    {
+        my ( $y1 , $y2 ) = ( $1 , $3 ) ;
+        $y2 ||= $y1 ;
+
+        my $y = $y1 ;
+        while ( $y <= $y2 )
+        {
+            push( @want_pages , sprintf( '%04d' , $y ) ) ;
+
+            for my $m ( 1 .. 12 )
+            {
+                push( @want_pages , sprintf( '%04d-%02d' , $y , $m ) ) ;
+
+                for my $d ( 1 .. days_in( $y , $m ) )
+                {
+                    push( @want_pages ,
+                        sprintf( '%04d-%02d-%02d' , $y , $m , $d ) ) ;
+                }
+            }
+
+            $y ++ ;
+        }
+    }
+
+    ########################################
+    # NOT RECOGNIZED
+
+    else
+    {
+        print "WARNING: ignoring invalid YMD spec '$x'\n" ;
+    }
+}
+
+###############################################################################
+#
+# Handle a single config option, from config file or command line.
+
+sub handle_cfg($)
+{
+    my $item = shift ;
+
+    ########################################
+    # Ends with '.pdf' - output filename
+    # - if multiple output filenames are specified,
+    #   the last name specified will be used
+
+    if ( $item =~ m|\.pdf$|i )
+    {
+        if ( $outfile eq '' )
+        {
+            $outfile = $item ;
+        }
+        else
+        {
+            print "ERROR: multiple output filenames specified\n" ;
+            $fail ++ ;
+        }
+    }
+
+    ########################################
+    # Starts wih a digit - asking for page(s)
+
+    elsif ( $item =~ m|^\d| )
+    {
+        add_want( $item ) ;
+    }
+
+    ########################################
+    # Setting a config variable, value is quoted
+
+    elsif ( $item =~ m|^(\S+?)\s*=\s*(["'])(.*?)\2\s*$| )
+    {
+        my ( $k , $v ) = ( $1 , $3 ) ;
+        $cfg{ lc( $k ) } = $v ;
+    }
+
+    ########################################
+    # Setting a config variable, value is NOT quoted
+
+    elsif ( $item =~ m|^(\S+?)\s*=\s*(.*)$| )
+    {
+        my ( $k , $v ) = ( $1 , $2 ) ;
+        $cfg{ lc( $k ) } = $v ;
+    }
+
+    ########################################
+    # Ignore comments and empty lines, otherwise throw a warning
+
+    else
+    {
+        my $oitem = $item ;
+
+        $item =~ s|#.*$|| ;
+        $item =~ s|\s+$|| ;
+
+        if ( $item ne '' )
+        {
+            print "ERROR: unable to parse config item, ignoring\n$oitem\n\n" ;
+        }
+    }
+}
+
+###############################################################################
+#
+# Read config file into memory
+
+sub read_config($)
+{
+    my $file = shift ;
+
+    ########################################
+    # Read the config file. Values read from the file will override the
+    # default values set above.
+
+    open( my $fh , '<' , $file )
+        or die "ERROR: can't read \"$file\": $!\n" ;
+
+    while ( my $line = <$fh> )
+    {
+        $line =~ s|\s+$|| ;
+        $line =~ s|^\s+|| ;
+        my $oline = $line ;
+
+        handle_cfg( $line ) ;
+    }
+
+    close $fh ;
+
+    ########################################
+    # The 'links' variable allows several possible values, they need to be
+    # converted to 1 or 0.
+
+    $cfg{'links'} = lc( $cfg{'links'} ) ;
+
+    if (    ( $cfg{'links'} eq 'true'  )
+         || ( $cfg{'links'} eq 'yes'   )
+         || ( $cfg{'links'} eq '1'     ) )
+    {
+        $links = 1 ;
+    }
+    elsif ( ( $cfg{'links'} eq 'false' )
+         || ( $cfg{'links'} eq 'no'    )
+         || ( $cfg{'links'} eq '0'     ) )
+    {
+        $links = 0 ;
+    }
+    else
+    {
+        print "ERROR: invalid 'links' value '" , $cfg{'links'} , "'\n" ;
+        $fail ++ ;
+    }
+
+    ########################################
+    # The 'da_type' variable only allows certain values.
+
+    unless (    ( $cfg{'da_type'} eq ''      )
+             || ( $cfg{'da_type'} eq 'blank' )
+             || ( $cfg{'da_type'} eq 'dots'  )
+             || ( $cfg{'da_type'} eq 'lines' ) )
+    {
+        print "ERROR: invalid 'da_type' value '" , $cfg{'da_type'} , "'\n" ;
+        $fail ++ ;
+    }
+}
+
+###############################################################################
+#
+# Calculate other useful values
+# - needs to be done AFTER parsing configuration items
+
+my $page_w_in       ;
+my $page_h_in       ;
+my $page_w_pt       ;
+my $page_h_pt       ;
+my $page_size       ;
+my $menu_width_in   ;
+my $menu_width_pt   ;
+my $close_width_in  ;
+my $close_width_pt  ;
+my $close_x_pt      ;
+my $b3_x_pt         ;
+my $b2_x_pt         ;
+my $b1_x_pt         ;
+my $header_ht_in    ;
+my $header_ht_pt    ;
+my $hline_y_pt      ;
+my $margin_x_in     ;
+my $margin_x_pt     ;
+my $margin_y_in     ;
+my $margin_y_pt     ;
+
+sub calculate_values()
+{
+    $page_w_in      = $page_w_px / $page_dpi ;
+    $page_h_in      = $page_h_px / $page_dpi ;
+
+    $page_w_pt      = $page_w_in * 72 ;
+    $page_h_pt      = $page_h_in * 72 ;
+
+    $page_size      = "${page_w_in}x${page_h_in}" ;
+
+    $menu_width_in  = $cfg{'menu_width_px'} / $page_dpi ;
+    $menu_width_pt  = $menu_width_in * 72 ;
+
+    $close_width_in = $cfg{'close_width_px'} / $page_dpi ;
+    $close_width_pt = $close_width_in * 72 ;
+
+    $close_x_pt     = $page_w_pt - $close_width_pt ;
+    $b3_x_pt        = $close_x_pt - $close_width_pt ;
+    $b2_x_pt        = $b3_x_pt - $close_width_pt ;
+    $b1_x_pt        = $b2_x_pt - $close_width_pt ;
+
+    $header_ht_in   = $cfg{'header_ht_px'} / $page_dpi ;
+    $header_ht_pt   = $header_ht_in * 72 ;
+
+    $hline_y_pt     = $page_h_pt - $header_ht_pt ;
+
+    $margin_x_in    = $cfg{'margin_x_px'} / $page_dpi ;
+    $margin_x_pt    = $margin_x_in * 72 ;
+
+    $margin_y_in    = $cfg{'margin_y_px'} / $page_dpi ;
+    $margin_y_pt    = $margin_y_in * 72 ;
+}
+
+###############################################################################
+#
+# Calculate prev/next month for a given YYYY-MM
+
+sub prevmo($)
+{
+    my $ym = shift ;
+
+    $ym =~ m|^(\d+)\-(\d+)$| ;
+    my ( $y , $m ) = ( $1 , $2 ) ;
+
+    $m -- ;
+    if ( $m < 1 )
+    {
+        $m = 12 ;
+        $y -- ;
+    }
+
+    return sprintf( '%04d-%02d' , $y , $m ) ;
+}
+
+sub nextmo($)
+{
+    my $ym = shift ;
+
+    $ym =~ m|^(\d+)\-(\d+)$| ;
+    my ( $y , $m ) = ( $1 , $2 ) ;
+
+    $m ++ ;
+    if ( $m > 12 )
+    {
+        $m = 1 ;
+        $y ++ ;
+    }
+
+    return sprintf( '%04d-%02d' , $y , $m ) ;
+}
+
+###############################################################################
+#
+# Calculate prev/next date for a given YYYY-MM-DD
+
+sub prevda($)
+{
+    my $ymd = shift ;
+
+    $ymd =~ m|^(\d+)\-(\d+)\-(\d+)$| ;
+    my ( $y , $m , $d ) = ( $1 , $2 , $3 ) ;
+
+    $d -- ;
+    if ( $d < 1 )
+    {
+        $m -- ;
+        $d = days_in( $y , $m ) ;
+
+        if ( $m < 1 )
+        {
+            $y -- ;
+            $m = 12 ;
+        }
+    }
+
+    return sprintf( '%04d-%02d-%02d' , $y , $m , $d ) ;
+}
+
+sub nextda($)
+{
+    my $ymd = shift ;
+
+    $ymd =~ m|^(\d+)\-(\d+)\-(\d+)$| ;
+    my ( $y , $m , $d ) = ( $1 , $2 , $3 ) ;
+
+    $d ++ ;
+    if ( $d > days_in( $y , $m ) )
+    {
+        $m ++ ;
+        $d = 1 ;
+
+        if ( $m > 12 )
+        {
+            $y ++ ;
+            $m = 1 ;
+        }
+    }
+
+    return sprintf( '%04d-%02d-%02d' , $y , $m , $d ) ;
+}
+
+###############################################################################
+#
+# Fill a grid (in memory) with days of the month for a given YYYY-MM
+# - returns a hash of { "row,col" => day (1-31) }
+
+sub ymgrid($$)
+{
+    my $yr  = shift ;
+    my $mo  = shift ;
+
+    my %rv  = () ;
+
+    ########################################
+    # Set up starting conditions
+    #
+    # $t    Noon UTC on the first day of the month
+    # $row  Which row in the grid we're filling
+
+    my $t   = timegm_modern( 0 , 0 , 12 , 1 , $mo-1 , $yr ) ;
+    my $row = 0 ;
+
+    while ( 1 )
+    {
+        ########################################
+        # Get (sec,min,hour,date,mo,yr,dow) for the current time
+
+        my @d = gmtime( $t ) ;
+
+        ########################################
+        # If we're into the next month, we're finished
+
+        last if ( $d[4] != ( $mo-1 ) ) ;
+
+        ########################################
+        # If the current day is a Sunday and isn't the 1st,
+        # start filling in the next row
+
+        if ( ( $d[6] == 0 ) && ( $d[3] != 1 ) )
+        {
+            $row ++ ;
+        }
+
+        ########################################
+        # Store this date in the grid
+
+        $rv{"$row,$d[6]"} = $d[3] ;
+
+        ########################################
+        # Jump ahead 24 hours
+
+        $t += 86400 ;
+    }
+
+    return %rv ;
+}
+
+###############################################################################
+#
+# Add an "annotation" which links to another page in the file
+
+sub link_to($$$$$$)
+{
+    my $page    = shift ;       # page where link will be added
+    my $target  = shift ;       # YYYY, YYYY-MM, or YYYY-MM-DD
+    my $lx      = shift ;       # tap area - left
+    my $by      = shift ;       # tap area - bottom
+    my $rx      = shift ;       # tap area - right
+    my $ty      = shift ;       # tap area - top
+
+    if ( $cfg{'links'} && exists( $page_of{$target} ) )
+    {
+        my $anno = $page->annotation() ;
+        $anno->rect( $lx , $by , $rx , $ty ) ;
+        $anno->link( $page_of{$target} ) ;
+    }
+}
+
+###############################################################################
+#
+# Add text, centered from a starting point on the bottom
+
+sub center_text($$$$$$;$)
+{
+    my $page    = shift ;
+    my $text    = shift ;
+    my $size    = shift ;
+    my $tlx     = shift ;               # X left
+    my $trx     = shift ;               # X right
+    my $tby     = shift ;               # Y baseline
+    my $linkto  = ( shift || '' ) ;
+
+    my $cx      = ( $tlx + $trx ) / 2 ;     # horizontal: center
+
+    my $tx = $page->text() ;
+    $tx->font( $font , $size ) ;
+    $tx->position( $cx , $tby + $size * 0.1 ) ;
+    my $w = $tx->text( $text , align => 'center' ) ;
+
+    if ( $linkto ne '' )
+    {
+        link_to( $page , $linkto ,
+            $cx - ( $w / 2 ) , $tby ,
+            $cx + ( $w / 2 ) , $tby + $size ) ;
+    }
+
+    return $w ;
+}
+
+###############################################################################
+#
+# Add text, left-aligned from a starting point on the bottom
+
+sub left_text($$$$$;$)
+{
+    my $page    = shift ;
+    my $text    = shift ;
+    my $size    = shift ;
+    my $tlx     = shift ;               # X left
+    my $tby     = shift ;               # Y baseline
+    my $linkto  = ( shift || '' ) ;
+
+    my $tx = $page->text() ;
+    $tx->font( $font , $size ) ;
+    $tx->position( $tlx , $tby + $size * 0.1 ) ;
+    my $w = $tx->text( $text , align => 'left' ) ;
+
+    if ( $linkto ne '' )
+    {
+        link_to( $page , $linkto ,
+            $tlx      , $tby ,
+            $tlx + $w , $tby + $size ) ;
+    }
+
+    return $w ;
+}
+
+###############################################################################
+#
+# Add text, right-aligned from a starting point on the bottom
+
+sub right_text($$$$$;$)
+{
+    my $page    = shift ;
+    my $text    = shift ;
+    my $size    = shift ;
+    my $trx     = shift ;               # X right
+    my $tby     = shift ;               # Y baseline
+    my $linkto  = ( shift || '' ) ;
+
+    my $tx = $page->text() ;
+    $tx->font( $font , $size ) ;
+    $tx->position( $trx , $tby + $size * 0.1 ) ;
+    my $w = $tx->text( $text , align => 'right' ) ;
+
+    if ( $linkto ne '' )
+    {
+        link_to( $page , $linkto ,
+            $trx - $w , $tby ,
+            $trx      , $tby + $size ) ;
+    }
+
+    return $w ;
+}
+
+###############################################################################
+#
+# Navigation button
+
+sub nav_button($$$$$$$$)
+{
+    my $page    = shift ;
+    my $text    = shift ;
+    my $dir     = shift ;
+    my $lx      = shift ;
+    my $by      = shift ;
+    my $rx      = shift ;
+    my $ty      = shift ;
+    my $target  = shift ;
+
+    my $size    = $cfg{'nav_link_size'} ;
+
+    ########################################
+    # Text centered at the bottom of the box
+
+    center_text( $page , $text , $size , $lx , $rx , $by + 0.1 * $size ) ;
+
+    ########################################
+    # Draw an arrow
+
+    my $uby = $by + $size ;
+    my $uh  = $ty - $uby ;
+
+    my $alx = $lx  + 0.2 * ( $rx - $lx  ) ;
+    my $acx = $lx  + 0.5 * ( $rx - $lx  ) ;
+    my $arx = $lx  + 0.8 * ( $rx - $lx  ) ;
+
+    my $aby = $uby + 0.2 * ( $ty - $uby ) ;
+    my $acy = $uby + 0.5 * ( $ty - $uby ) ;
+    my $aty = $uby + 0.8 * ( $ty - $uby ) ;
+
+    my $gr = $page->graphics() ;
+    $gr->save() ;
+    $gr->stroke_color( '#000000' ) ;
+    $gr->fill_color( '#C0C0C0' ) ;
+
+    if ( ( $dir eq 'l' ) || ( $dir eq 'w' ) )
+    {
+        $gr->move( $alx , $acy )
+            -> line( $arx , $aty )
+            -> line( $arx , $aby )
+            -> line( $alx , $acy )
+            -> paint() ;
+    }
+    elsif ( ( $dir eq 'r' ) || ( $dir eq 'e' ) )
+    {
+        $gr->move( $arx , $acy )
+            -> line( $alx , $aty )
+            -> line( $alx , $aby )
+            -> line( $arx , $acy )
+            -> paint() ;
+    }
+    elsif ( ( $dir eq 'u' ) || ( $dir eq 'n' ) )
+    {
+        $gr->move( $acx , $aty )
+            -> line( $alx , $aby )
+            -> line( $arx , $aby )
+            -> line( $acx , $aty )
+            -> paint() ;
+    }
+    elsif ( ( $dir eq 'd' ) || ( $dir eq 's' ) )
+    {
+        $gr->move( $acx , $aby )
+            -> line( $alx , $aty )
+            -> line( $arx , $aty )
+            -> line( $acx , $aby )
+            -> paint() ;
+    }
+
+    $gr->restore() ;
+
+    ########################################
+    # Place the link
+
+    link_to( $page , $target , $lx , $by , $rx , $ty ) ;
+}
+
+###############################################################################
+#
+# Add lines to separate the menu area, header row, and close button
+
+sub page_borders($)
+{
+    my $page = shift ;
+
+    my $gr = $page->graphics() ;
+    $gr->save() ;
+    $gr->line_width( 0.5 ) ;
+
+    ########################################
+    # vertical line, left, separating menu
+
+    $gr->move( $menu_width_pt , $page_h_pt )->line( $menu_width_pt , 0 ) ;
+
+    ########################################
+    # horizontal line, top, separating header
+
+    $gr->move( $menu_width_pt , $hline_y_pt )->line( $page_w_pt , $hline_y_pt ) ;
+
+    ########################################
+    # vertical line, top right, separating close button
+
+    $gr->move( $close_x_pt , $page_h_pt )->line( $close_x_pt , $hline_y_pt ) ;
+
+    ########################################
+    # vertical lines separating three "button" areas
+
+    $gr->move( $b3_x_pt , $page_h_pt )->line( $b3_x_pt , $hline_y_pt ) ;
+    $gr->move( $b2_x_pt , $page_h_pt )->line( $b2_x_pt , $hline_y_pt ) ;
+    $gr->move( $b1_x_pt , $page_h_pt )->line( $b1_x_pt , $hline_y_pt ) ;
+
+    $gr->stroke() ;
+
+    $gr->restore() ;
+}
+
+###############################################################################
+#
+# Draw one month box within a year page
+# TODO:
+# - calculate font size to "scale" within the box (?)
+# - these will make it easy to add mini-calendars in the future
+
+sub draw_month($$$$$$$$$$$)
+{
+    my $page    = shift ;           # page to draw on
+    my $yr      = shift ;           # year, i.e. 2023
+    my $mo      = shift ;           # month (1-12)
+    my $da      = shift ;           # day (1-31) to be highlighted, 0 for none
+    my $blx     = shift ;           # X left
+    my $bby     = shift ;           # Y bottom
+    my $brx     = shift ;           # X right
+    my $bty     = shift ;           # Y top
+    my $title   = shift ;           # title
+    my $mo_size = shift ;           # font size - month name
+    my $da_size = shift ;           # font size - days
+
+    ########################################
+    # Get the list of which dates are where in the grid
+
+    my %date = ymgrid( $yr , $mo ) ;
+
+    ########################################
+    # Start a graphics object
+
+    my $gr = $page->graphics() ;
+    $gr->line_width( 1 ) ;
+
+    ########################################
+    # Draw the month title
+    # - possibly generate a link to per-month page
+
+    center_text( $page , $title , $mo_size ,
+        $blx , $brx , $bty - $mo_size ) ;
+
+    my $k = sprintf( '%04d-%02d' , $yr , $mo ) ;
+    link_to( $page , $k , $blx , $bty - $mo_size , $brx , $bty ) ;
+
+    ########################################
+    # Calculate the spacing between the columns of numbers
+
+    my $tly = $bty - ( $mo_size * 1.25 ) ;
+    my $dcw = ( $brx - $blx ) / 7 ;
+    my $drh = ( $tly - $bby ) / 6 ;
+
+    ########################################
+    # Place the numbers, with links to per-date pages
+
+    for my $row ( 0 .. 5 )
+    {
+        for my $col ( 0 .. 6 )
+        {
+            if ( exists( $date{"$row,$col"} ) )
+            {
+                ########################################
+                # math
+
+                my $xl = $blx + ( $col * $dcw ) ;
+                my $xr = $xl + $dcw ;
+                my $yb = $tly - ( $row * $drh ) - ( $drh * 0.1 ) - $da_size ;
+                my $yt = $yb + $drh ;
+
+                ########################################
+                # highlight "this" date
+
+                if ( $date{"$row,$col"} eq $da )
+                {
+                    $gr->save() ;
+                    $gr->fill_color( '#E0E0E0' ) ;
+                    $gr->rectangle( $xl , $yb , $xr , $yt ) ;
+                    $gr->fill() ;
+                    $gr->restore() ;
+                }
+
+                ########################################
+                # number
+
+                center_text( $page , $date{"$row,$col"} , $da_size ,
+                    $xl , $xr , $yb ) ;
+
+                ########################################
+                # link (not to "this" date)
+
+                if ( $date{"$row,$col"} ne $da )
+                {
+                    my $k = sprintf( '%04d-%02d-%02d' , $yr , $mo , $date{"$row,$col"} ) ;
+                    link_to( $page , $k , $xl , $yb , $xr , $yt ) ;
+                }
+            }
+        } # col
+    } # row
+
+    ########################################
+    # Line below month title
+
+    $gr->line_width( 0.5 ) ;
+    $gr->move( $blx , $tly )->line( $brx , $tly ) ;
+    $gr->stroke() ;
+
+    ########################################
+    # Draw the outer box
+
+    $gr->rectangle( $blx , $bby , $brx , $bty ) ;
+    $gr->stroke() ;
+}
+
+###############################################################################
+#
+# Set a page to contain per-month calendars for a specific year
+
+sub setpage_yr($$)
+{
+    my $page = shift ;
+    my $yr = shift ;
+
+    ########################################
+    # Calculate usable area
+
+    my $usable_w_pt = $page_w_pt - $menu_width_pt - 2 * $margin_x_pt ;
+    my $usable_h_pt = $page_h_pt - $header_ht_pt  - 2 * $margin_y_pt ;
+
+    ########################################
+    # Calculate size of per-month boxes
+
+    my $box_w_pt = $usable_w_pt / 3 ;
+    my $box_h_pt = $usable_h_pt / 4 ;
+
+    ########################################
+    # Lines to separate menu area and header row
+
+    page_borders( $page ) ;
+
+    ########################################
+    # Year at top of page
+
+    my $tlx = $menu_width_pt + $margin_x_pt ;
+    my $tby = $hline_y_pt + 0.2 * $cfg{'yr_title_size'} ;
+
+    left_text( $page , $yr , $cfg{'yr_title_size'} , $tlx , $tby ) ;
+
+    ########################################
+    # Next year link
+
+    my $ayr = sprintf( '%04d' , $yr + 1 ) ;
+    if ( exists( $page_of{$ayr} ) )
+    {
+        nav_button( $page , $ayr , 'e' ,
+            $b3_x_pt , $hline_y_pt , $close_x_pt , $page_h_pt , $ayr ) ;
+    }
+
+    ########################################
+    # Prev year link
+
+    $ayr = sprintf( '%04d' , $yr - 1 ) ;
+    if ( exists( $page_of{$ayr} ) )
+    {
+        nav_button( $page , $ayr , 'w' ,
+            $b1_x_pt , $hline_y_pt , $b2_x_pt , $page_h_pt , $ayr ) ;
+    }
+
+    ########################################
+    # Calendar - per-month boxes
+
+    for my $mo ( 1 .. 12 )
+    {
+        my $row = 3 - int( ( $mo - 1 ) / 3 ) ;
+        my $col = ( $mo - 1 ) % 3 ;
+
+        my $lx  = $menu_width_pt + $margin_x_pt + ( $col * $box_w_pt ) ;
+        my $rx  = $lx + $box_w_pt ;
+        my $by  = $margin_y_pt + ( $row * $box_h_pt ) ;
+        my $ty  = $by + $box_h_pt ;
+        my $txt = strftime( '%B' , 0 , 0 , 0 , 1 , $mo-1 , $yr-1900 ) ;
+
+        draw_month( $page , $yr , $mo , 0 , $lx , $by , $rx , $ty ,
+            $txt , $cfg{'yr_mo_size'} , $cfg{'yr_da_size'} ) ;
+    }
+}
+
+###############################################################################
+#
+# Set a page to contain a single-month calendar
+
+sub setpage_mo($$$)
+{
+    my $page = shift ;
+    my $yr   = shift ;
+    my $mo   = shift ;
+
+    my $yyyymm  = sprintf( '%04d-%02d' , $yr , $mo ) ;
+
+    ########################################
+    # Calculate usable area
+
+    my $usable_w_pt = $page_w_pt - $menu_width_pt - 2 * $margin_x_pt ;
+    my $usable_h_pt = $page_h_pt - $header_ht_pt  - 2 * $margin_y_pt ;
+
+    ########################################
+    # Calculate sizes of per-day boxes
+
+    my $dow_h_pt = $cfg{'mo_dw_size'} * 1.2 ;
+
+    my $box_w_pt = $usable_w_pt / 7 ;
+    my $box_h_pt = ( $usable_h_pt - $dow_h_pt ) / 6 ;
+
+    ########################################
+    # Lines to separate menu area and header row
+
+    page_borders( $page ) ;
+
+    ########################################
+    # Next month link
+
+    my $target = nextmo( $yyyymm ) ;
+    if ( exists( $page_of{$target} ) )
+    {
+        my ( $tyr , $tmo ) = split( /\-/ , $target ) ;
+        $tmo =~ s|^0|| ;
+        my $text = strftime( '%b' , 0 , 0 , 0 , 1 , $tmo-1 , $yr-1900 ) ;
+
+        nav_button( $page , $text , 'e' ,
+            $b3_x_pt , $hline_y_pt , $close_x_pt , $page_h_pt , $target ) ;
+    }
+
+    ########################################
+    # Year link
+
+    $target = sprintf( '%04d' , $yr ) ;
+    if ( exists( $page_of{$target} ) )
+    {
+        nav_button( $page , $target , 'n' ,
+            $b2_x_pt , $hline_y_pt , $b3_x_pt , $page_h_pt , $target ) ;
+    }
+
+    ########################################
+    # Prev month link
+
+    $target = prevmo( $yyyymm ) ;
+    if ( exists( $page_of{$target} ) )
+    {
+        my ( $tyr , $tmo ) = split( /\-/ , $target ) ;
+        $tmo =~ s|^0|| ;
+        my $text = strftime( '%b' , 0 , 0 , 0 , 1 , $tmo-1 , $yr-1900 ) ;
+
+        nav_button( $page , $text , 'w' ,
+            $b1_x_pt , $hline_y_pt , $b2_x_pt , $page_h_pt , $target ) ;
+    }
+
+    ########################################
+    # Title at top of page
+
+    my $page_title = strftime( '%B %Y' , 0 , 0 , 0 , 1 , $mo-1 , $yr-1900 ) ;
+
+    my $tlx = $menu_width_pt + $margin_x_pt ;
+###     my $tby = $page_h_pt - ( 0.9 * $header_ht_pt ) ;
+    my $tby = $hline_y_pt + 0.2 * $cfg{'mo_title_size'} ;
+    my $tty = $tby + $cfg{'mo_title_size'} ;
+
+    left_text( $page , $page_title , $cfg{'mo_title_size'} , $tlx , $tby ) ;
+
+    ########################################
+    # Column headers - days of the week
+
+    my $gr = $page->graphics() ;
+
+    for my $col ( 0 .. 6 )
+    {
+        my $blx = $menu_width_pt + $margin_x_pt + ( $col * $box_w_pt ) ;
+        my $brx = $blx + $box_w_pt ;
+        my $bby = $margin_y_pt + ( 6 * $box_h_pt ) ;
+        my $bty = $bby + $dow_h_pt ;
+
+        # week of 2023-01-01 starts on a sunday
+        my $txt = strftime( '%A' , 0 , 0 , 0 , $col+1 , 0 , 123 ) ;
+
+        $gr->line_width( 1 ) ;
+        $gr->rectangle( $blx , $bby , $brx , $bty ) ;
+        $gr->stroke() ;
+
+        center_text( $page , $txt , $cfg{'mo_dw_size'} ,
+            $blx , $brx , $bby + $cfg{'mo_dw_size'} * 0.1 ) ;
+    }
+
+    ########################################
+    # Draw grid of days
+
+    my %date = ymgrid( $yr , $mo ) ;
+
+    for my $row ( 0 .. 5 )
+    {
+        for my $col ( 0 .. 6 )
+        {
+            my $blx = $menu_width_pt + $margin_x_pt + ( $col * $box_w_pt ) ;
+            my $brx = $blx + $box_w_pt ;
+            my $bby = $margin_y_pt + ( ( 5 - $row ) * $box_h_pt ) ;
+            my $bty = $bby + $box_h_pt ;
+            my $drx = $blx + $box_w_pt * 0.4 ;
+            my $dby = $bty - $box_h_pt * 0.3 ;
+
+            if ( exists( $date{"$row,$col"} ) )
+            {
+                $gr->line_width( 1 ) ;
+                $gr->rectangle( $blx , $bby , $brx , $bty ) ;
+                $gr->stroke() ;
+
+                my $link_to = sprintf( '%04d-%02d-%02d' ,
+                    $yr , $mo , $date{"$row,$col"} ) ;
+
+                #left_text( $page , $date{"$row,$col"} , $cfg{'mo_da_size'} ,
+                #    $blx + 2 , $bty - $cfg{'mo_da_size'} , $link_to ) ;
+                right_text( $page , $date{"$row,$col"} , $cfg{'mo_da_size'} ,
+                    $brx - 2 , $bty - $cfg{'mo_da_size'} , $link_to ) ;
+            }
+            else
+            {
+                if ( $col == 0 )
+                {
+                    $gr->line_width( 1 ) ;
+                    $gr->move( $blx , $bty )->line( $blx , $bby ) ;
+                    $gr->stroke() ;
+                }
+
+                if ( $col == 6 )
+                {
+                    $gr->line_width( 1 ) ;
+                    $gr->move( $brx , $bby )->line( $brx , $bty ) ;
+                    $gr->stroke() ;
+                }
+
+                if ( $row == 5 )
+                {
+                    $gr->line_width( 1 ) ;
+                    $gr->move( $blx , $bby )->line( $brx , $bby ) ;
+                    $gr->stroke() ;
+                }
+            }
+        }
+    }
+
+    ########################################
+    # Draw prev month calendar
+
+    my $sby = $margin_y_pt ;
+    my $sty = $margin_y_pt + $box_h_pt ;
+
+    my $slx = $menu_width_pt + $margin_x_pt + ( 3 * $box_w_pt ) ;
+    my $srx = $menu_width_pt + $margin_x_pt + ( 5 * $box_w_pt ) ;
+
+    my $sy = $yr ;
+    my $sm = $mo - 1 ;
+    if ( $sm < 1 )
+    {
+        $sm = 12 ;
+        $sy -- ;
+    }
+
+    my $txt = strftime( '%B %Y' , 0 , 0 , 0 , 1 , $sm-1 , $sy-1900 ) ;
+
+    draw_month( $page , $sy , $sm , 0 , $slx , $sby , $srx , $sty ,
+        $txt , $cfg{'mo_sm_size'} , $cfg{'mo_sd_size'} ) ;
+
+    ########################################
+    # Draw next month calendar
+
+    $slx = $menu_width_pt + $margin_x_pt + ( 5 * $box_w_pt ) ;
+    $srx = $menu_width_pt + $margin_x_pt + ( 7 * $box_w_pt ) ;
+
+    $sy = $yr ;
+    $sm = $mo + 1 ;
+    if ( $sm > 12 )
+    {
+        $sm = 1 ;
+        $sy ++ ;
+    }
+
+    $txt = strftime( '%B %Y' , 0 , 0 , 0 , 1 , $sm-1 , $sy-1900 ) ;
+
+    draw_month( $page , $sy , $sm , 0 , $slx , $sby , $srx , $sty ,
+        $txt , $cfg{'mo_sm_size'} , $cfg{'mo_sd_size'} ) ;
+}
+
+###############################################################################
+#
+# Set a page to contain a single day
+
+sub setpage_da($$$$)
+{
+    my $page    = shift ;
+    my $yr      = shift ;
+    my $mo      = shift ;
+    my $da      = shift ;
+
+    my $yyyymmdd = sprintf( '%04d-%02d-%02d' , $yr , $mo , $da ) ;
+
+    ########################################
+    # Calculate yesterday and tomorrow's dates
+
+    my $t       = timegm_modern( 0 , 0 , 12 , $da , $mo-1 , $yr ) ;
+
+    my $prev_key  = strftime( '%Y-%m-%d' , gmtime( $t - 86400 ) ) ;
+    my $prev_txt  = strftime( '%m-%d'    , gmtime( $t - 86400 ) ) ;
+    my $next_key  = strftime( '%Y-%m-%d' , gmtime( $t + 86400 ) ) ;
+    my $next_txt  = strftime( '%m-%d'    , gmtime( $t + 86400 ) ) ;
+
+    ############################################################
+    # Lines to separate menu area and header row
+
+    page_borders( $page ) ;
+
+    ############################################################
+    # Links to prev/next dates
+
+    ########################################
+    # Next date link
+
+    my $target = nextda( $yyyymmdd ) ;
+    if ( exists( $page_of{$target} ) )
+    {
+        my ( $tyr , $tmo, $tda  ) = split( /\-/ , $target ) ;
+        $tmo =~ s|^0|| ;
+        $tda =~ s|^0|| ;
+        my $text = strftime( '%m-%d' , 0 , 0 , 0 , $tda , $tmo-1 , $tyr-1900 ) ;
+
+        nav_button( $page , $text , 'e' ,
+            $b3_x_pt , $hline_y_pt , $close_x_pt , $page_h_pt , $target ) ;
+    }
+
+    ########################################
+    # Month link
+
+    $target = sprintf( '%04d-%02d' , $yr , $mo ) ;
+    if ( exists( $page_of{$target} ) )
+    {
+        my $text = strftime( '%b' , 0 , 0 , 0 , 1 , $mo-1 , $yr-1900 ) ;
+
+        nav_button( $page , $text , 'n' ,
+            $b2_x_pt , $hline_y_pt , $b3_x_pt , $page_h_pt , $target ) ;
+    }
+
+    ########################################
+    # Prev date link
+
+    $target = prevda( $yyyymmdd ) ;
+    if ( exists( $page_of{$target} ) )
+    {
+        my ( $tyr , $tmo , $tda ) = split( /\-/ , $target ) ;
+        $tmo =~ s|^0|| ;
+        $tda =~ s|^0|| ;
+        my $text = strftime( '%m-%d' , 0 , 0 , 0 , $tda , $tmo-1 , $yr-1900 ) ;
+
+        nav_button( $page , $text , 'w' ,
+            $b1_x_pt , $hline_y_pt , $b2_x_pt , $page_h_pt , $target ) ;
+    }
+
+    ############################################################
+    # Header lines
+
+    my $tlx = $menu_width_pt + $margin_x_pt ;
+
+    my $txt = strftime( $cfg{'da_h1_format'} , gmtime( $t ) ) ;
+    my $tby = $hline_y_pt + 0.2 * $cfg{'da_h1_size'} ;
+    left_text( $page , $txt , $cfg{'da_h1_size'} , $tlx , $tby ) ;
+
+    $txt = strftime( $cfg{'da_h2_format'} , gmtime( $t ) ) ;
+    $tby = $hline_y_pt + 1.2 * $cfg{'da_h1_size'} ;
+    left_text( $page , $txt , $cfg{'da_h2_size'} , $tlx , $tby ) ;
+
+    ############################################################
+    # Maybe add a small monthly calendar in the corner
+    # - also calculate the usable area of the screen
+
+    # calendar box coordinates
+
+    my $clx = 0 ;
+    my $cby = 0 ;
+    my $crx = 0 ;
+    my $cty = 0 ;
+    my $ok  = 0 ;
+
+    # limits for usable area within the page
+
+    my $ul1 = $menu_width_pt ;
+    my $ul2 = $menu_width_pt ;
+    my $ul3 = $menu_width_pt ;
+    my $ur1 = $page_w_pt ;
+    my $ur2 = $page_w_pt ;
+    my $ur3 = $page_w_pt ;
+    my $uy1 = $page_h_pt - $header_ht_pt ;
+    my $uy2 = $margin_y_pt ;
+
+    if ( $cfg{'da_mcal_pos'} eq 'ne' )
+    {
+        $cty = $hline_y_pt ;
+        $cby = $hline_y_pt - $cfg{'da_mcal_h_pt'} ;
+
+        $crx = $page_w_pt ;
+        $clx = $crx - $cfg{'da_mcal_w_pt'} ;
+
+        $ur1 = $clx ;
+        $uy1 = $cby ;
+
+        $ok  = 1 ;
+    }
+    elsif ( $cfg{'da_mcal_pos'} eq 'nw' )
+    {
+        $cty = $hline_y_pt ;
+        $cby = $hline_y_pt - $cfg{'da_mcal_h_pt'} ;
+
+        $clx = $menu_width_pt ;
+        $crx = $clx + $cfg{'da_mcal_w_pt'} ;
+
+        $ul1 = $crx ;
+        $uy1 = $cby ;
+
+        $ok = 1 ;
+    }
+    elsif ( $cfg{'da_mcal_pos'} eq 'se' )
+    {
+        $cby = 0 ;
+        $cty = $cfg{'da_mcal_h_pt'} ;
+
+        $crx = $page_w_pt ;
+        $clx = $crx - $cfg{'da_mcal_w_pt'} ;
+
+        $ur3 = $clx ;
+        $uy2 = $cty ;
+
+        $ok = 1 ;
+    }
+    elsif ( $cfg{'da_mcal_pos'} eq 'sw' )
+    {
+        $cby = 0 ;
+        $cty = $cfg{'da_mcal_h_pt'} ;
+
+        $clx = $menu_width_pt ;
+        $crx = $clx + $cfg{'da_mcal_w_pt'} ;
+
+        $ul3 = $crx ;
+        $uy2 = $cty ;
+
+        $ok = 1 ;
+    }
+    elsif ( $cfg{'da_mcal_pos'} ne '' )
+    {
+        print "ERROR: da_mcal_pos must be one of [ 'ne', 'nw', 'se', 'sw ]\n" ;
+    }
+
+    ########################################
+    # If we're adding a calendar, do it
+
+    if ( $ok )
+    {
+        my $ctitle = strftime( '%B' , 0 , 0 , 0 , 0 , $mo , $yr ) ;
+
+        draw_month( $page , $yr , $mo , $da , $clx , $cby , $crx , $cty ,
+            $ctitle , $cfg{'da_mcal_tsize'} , $cfg{'da_mcal_dsize'} ) ;
+    }
+
+    ########################################
+    # No calendar, undo any subtractions from the usable area
+
+    else
+    {
+        $ul1 = $ul3 = $ul2 ;
+        $ur1 = $ur3 = $ur2 ;
+        $uy1 = $page_h_pt - $header_ht_pt - $margin_y_pt ;
+        $uy2 = $margin_y_pt ;
+    }
+
+    ############################################################
+    # Beyond this would be any "filling" in the page's usable area -
+    # lines, dots, whatever suits.
+
+    if ( $cfg{'da_type'} =~ m|^lines?$| )
+    {
+        ########################################
+        # Lines every so often. Indent from margins.
+
+        $ul1 += $margin_x_pt ;
+        $ul2 += $margin_x_pt ;
+        $ul3 += $margin_x_pt ;
+        $ur1 -= $margin_x_pt ;
+        $ur2 -= $margin_x_pt ;
+        $ur3 -= $margin_x_pt ;
+
+        my $da_pitch = $cfg{'da_pitch'} ;
+        my $zy = $hline_y_pt - $margin_y_pt - $da_pitch ;
+
+        my $gr = $page->graphics() ;
+        $gr->save() ;
+        $gr->stroke_color( '#C0C0C0' ) ;
+
+        while ( $zy > $margin_y_pt )
+        {
+            my $zlx  = $ul2 ;
+            if ( $zy >= $uy1 ) { $zlx = $ul1 ; }
+            if ( $zy <= $uy2 ) { $zlx = $ul3 ; }
+
+            my $zrx = $ur2 ;
+            if ( $zy >= $uy1 ) { $zrx = $ur1 ; }
+            if ( $zy <= $uy2 ) { $zrx = $ur3 ; }
+
+            $gr->move( $zlx , $zy )->line( $zrx , $zy ) ;
+
+            $zy -= $da_pitch ;
+        }
+
+        $gr->stroke() ;
+        $gr->restore() ;
+    }
+
+    elsif ( $cfg{'da_type'} =~ m|^dots?$| )
+    {
+        ########################################
+        # Dots every so often. Ignore margins.
+
+        my $da_pitch = $cfg{'da_pitch'} ;
+        my $zy = $hline_y_pt - $da_pitch ;
+
+        my $gr = $page->graphics() ;
+        $gr->save() ;
+
+        while ( $zy > 0.3 )
+        {
+            my $zlx  = $ul2 ;
+            if ( $zy >= ( $uy1 - 0.3 ) ) { $zlx = $ul1 ; }
+            if ( $zy <= ( $uy2 + 0.3 ) ) { $zlx = $ul3 ; }
+            $zlx += 0.3 ;
+
+            my $zrx = $ur2 ;
+            if ( $zy >= ( $uy1 - 0.3 ) ) { $zrx = $ur1 ; }
+            if ( $zy <= ( $uy2 + 0.3 ) ) { $zrx = $ur3 ; }
+            $zrx -= 0.3 ;
+
+            my $zx = $ul2 + $da_pitch ;
+            while ( $zx < ( $ur2 - 0.3 ) )
+            {
+                if ( ( $zx > $zlx ) && ( $zx < $zrx ) )
+                {
+                    $gr->rectangle( $zx - 0.25 , $zy - 0.25 , $zx + 0.25 , $zy + 0.25 ) ;
+                }
+
+                $zx += $da_pitch ;
+            }
+
+            $zy -= $da_pitch ;
+        }
+
+        $gr->stroke() ;
+        $gr->restore() ;
+
+    }
+
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+#
+# Process command line
+
+getopts( 'hc:g' , \%opt ) ;
+$opt{'h'} && usage() ;
+
+########################################
+# If we're being asked to print a sample config file, do it. Note that
+# generate_config() exits after printing the config, no need to do it here.
+
+init_config() ;
+$opt{'g'} && generate_config() ;
+
+########################################
+# If we were given a config file, read it.
+
+$config_file = ( $opt{'c'} || '' ) ;
+if ( $config_file ne '' )
+{
+    read_config( $config_file ) ;
+}
+
+########################################
+# Treat the command line args as if they had been read from a config file.
+# - Config options will override the same option from config file.
+# - An output filename on the command line will override an output filename
+#   from the config file.
+# - Any page specifiers on the command line will override ALL page specifiers
+#   from the config file.
+
+my $reset_outfile = 0 ;
+my $reset_pages   = 0 ;
+
+while ( my $x = shift @ARGV )
+{
+    if ( $x =~ m|\.pdf$|i )
+    {
+        unless ( $reset_outfile )
+        {
+            $outfile      = '' ;
+            $reset_outfile = 1 ;
+        }
+    }
+    elsif ( $x =~ m|^\d| )
+    {
+        unless ( $reset_pages )
+        {
+            @want_pages  = () ;
+            $reset_pages = 1 ;
+        }
+    }
+
+    handle_cfg( $x ) ;
+}
+
+$fail && die "cannot continue\n" ;
+
+########################################
+# Make sure we have an output file and at least one page to generate
+
+if ( $outfile eq '' )
+{
+    usage "ERROR: no output file specified\n" ;
+}
+
+if ( @want_pages < 1 )
+{
+    usage "ERROR: no YYYY or YYYY-MM was specified\n" ;
+}
+
+########################################
+# Calculate other useful values
+
+calculate_values() ;
+
+###############################################################################
+#
+# Create a blank PDF file
+
+my $the_pdf = new PDF::API2( compress => 1 ) ;
+
+$the_pdf->title( 'Calendar' ) ;
+$the_pdf->author( 'John Simpson' ) ;
+$the_pdf->creator( 'rm2-cal' ) ;
+$the_pdf->producer( 'rm2-cal' ) ;
+
+my $the_outline = $the_pdf->outline() ;
+
+########################################
+# Add the font we'll be using
+
+$font = $the_pdf->font( $cfg{'font_name'} ) ;
+
+########################################
+# Add blank pages to the PDF
+# - we do this because pages need to exist before we can link to them
+
+for my $x ( @want_pages )
+{
+    if ( exists $page_of{$x} )
+    {
+        print "ERROR: duplicate page '$x'\n" ;
+        $fail = 1 ;
+    }
+
+    $page_of{$x} = $the_pdf->page() ;
+    $page_of{$x}->size( $page_size ) ;
+}
+
+$fail && die "cannot continue\n" ;
+
+########################################
+# Add content to the pages
+
+for my $x ( @want_pages )
+{
+    if ( $x =~ m|^\d\d\d\d$| )
+    {
+        setpage_yr( $page_of{$x} , $x ) ;
+    }
+    elsif ( $x =~ m|^(\d\d\d\d)\-(\d\d)$| )
+    {
+        my ( $y , $m ) = ( $1 , $2 ) ;
+        $m =~ s|^0|| ;
+
+        setpage_mo( $page_of{$x} , $y , $m ) ;
+    }
+    elsif ( $x =~ m|^(\d\d\d\d)\-(\d\d)\-(\d\d)$| )
+    {
+        my ( $y , $m , $d ) = ( $1 , $2 , $3 ) ;
+        $m =~ s|^0|| ;
+        $d =~ s|^0|| ;
+
+        setpage_da( $page_of{$x} , $y , $m , $d ) ;
+    }
+    else
+    {
+        die "FATAL: '$x': unable to parse, should have been caught already\n" ;
+    }
+}
+
+########################################
+# Generate externally visible links
+# - not sure how to associate a NAME with the destination
+#   https://github.com/ssimms/pdfapi2/issues/54
+#   https://github.com/PhilterPaper/Perl-PDF-Builder/issues/202
+
+### for my $x ( @want_pages )
+### {
+###     my $dest = new PDF::API2::NamedDestination( $the_pdf ) ;
+###     $dest->destination( $page_of{$x} ) ;
+### }
+
+########################################
+# Generate Table of Contents
+
+my %olitem = () ;
+
+for my $x ( sort @want_pages )
+{
+    if ( $x =~ m|^\d\d\d\d$| )
+    {
+        $olitem{$x} = $the_outline->outline() ;
+    }
+    elsif ( $x =~ m|^(\d\d\d\d)\-\d\d$| )
+    {
+        my $y = $1 ;
+        my $parent = ( $olitem{$y} || $the_outline ) ;
+
+        $olitem{$x} = $parent->outline() ;
+    }
+    elsif ( $x =~ m|^((\d\d\d\d)\-\d\d)\-\d\d$| )
+    {
+        my ( $ym , $y ) = ( $1 , $2 ) ;
+        my $parent = ( $olitem{$ym} || $olitem{$y} || $the_outline ) ;
+
+        $olitem{$x} = $parent->outline() ;
+    }
+
+    if ( exists( $olitem{$x} ) )
+    {
+        $olitem{$x}->title( $x ) ;
+        $olitem{$x}->destination( $page_of{$x} ) ;
+    }
+}
+
+########################################
+# Save it
+
+$the_pdf->save( $outfile ) ;

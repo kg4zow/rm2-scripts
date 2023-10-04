@@ -1,0 +1,25 @@
+#!/bin/bash
+#
+# gen
+# jms1 2023-10-03
+#
+# generate sample PDF files
+
+set -e
+
+SPECS="
+2023
+2023,2025
+2023-10
+2023-10,2023-12
+2023-xx
+2023-10-01
+2023-10-01,2023-10-03
+2023-10-xx
+2023-xx-xx
+"
+
+for SPEC in $SPECS
+do
+    ( set -x ; ./rm2-cal $SPEC $SPEC.pdf )
+done
