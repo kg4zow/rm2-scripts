@@ -7,6 +7,10 @@
 #
 # 2023-10-04 jms1 - final cleanup before "publishing" on Github.
 #
+# 2023-11-01 jms1
+#   - adding default config file location
+#   - expanding '$HOME' in font_name value
+#
 ###############################################################################
 #
 # The MIT License (MIT)
@@ -174,7 +178,13 @@ sub generate_config()
     print <<EOF ;
 ###############################################################################
 #
-# Sample config file. Produces a 2023 calendar.
+# Sample config file.
+#
+# Store a customized copy of this file in one of the following locations
+# to set default values for the script:
+#
+# - \$XDG_CONFIG_HOME/rm2-cal/rm2-cal.cfg
+# - \$HOME/.config/rm2-cal/rm2-cal.cfg
 
 ########################################
 # Settings for all pages
@@ -516,6 +526,12 @@ sub handle_cfg($)
     elsif ( $item =~ m|^(\S+?)\s*=\s*(["'])(.*?)\2\s*$| )
     {
         my ( $k , $v ) = ( $1 , $3 ) ;
+
+        if ( $k eq 'font_name' )
+        {
+            $v =~ s|^\$HOME/|$ENV{'HOME'}/| ;
+        }
+
         $cfg{ lc( $k ) } = $v ;
     }
 
@@ -525,6 +541,12 @@ sub handle_cfg($)
     elsif ( $item =~ m|^(\S+?)\s*=\s*(.*)$| )
     {
         my ( $k , $v ) = ( $1 , $2 ) ;
+
+        if ( $k eq 'font_name' )
+        {
+            $v =~ s|^\$HOME/|$ENV{'HOME'}/| ;
+        }
+
         $cfg{ lc( $k ) } = $v ;
     }
 
@@ -1713,15 +1735,33 @@ $opt{'h'} && usage() ;
 # generate_config() exits after printing the config, no need to do it here.
 
 init_config() ;
-$opt{'g'} && generate_config() ;
+
+if ( $opt{'g'} )
+{
+    generate_config() ;
+    exit 0 ;
+}
 
 ########################################
 # If we were given a config file, read it.
+# Otherwise, try a list of possible default locations.
 
 $config_file = ( $opt{'c'} || '' ) ;
 if ( $config_file ne '' )
 {
     read_config( $config_file ) ;
+}
+else
+{
+    if (    ( exists $ENV{'XDG_CONFIG_HOME'} )
+         && ( -f "$ENV{'XDG_CONFIG_HOME'}/rm2-cal/rm2-cal.cfg" ) )
+    {
+        read_config( "$ENV{'XDG_CONFIG_HOME'}/rm2-cal/rm2-cal.cfg" ) ;
+    }
+    elsif ( -f "$ENV{'HOME'}/.config/rm2-cal/rm2-cal.cfg" )
+    {
+        read_config( "$ENV{'HOME'}/.config/rm2-cal/rm2-cal.cfg" ) ;
+    }
 }
 
 ########################################
