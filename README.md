@@ -50,6 +50,20 @@ Sites that I maintain (this is *not* a complete list)
 
 * [`https://qmail.jms1.net/`](https://qmail.jms1.net/) is where I used to write information about [qmail](https://cr.yp.to/qmail.html), an open-source (now public domain) MTA (mail transfer agent, or "mail server program"). I still use it, but I haven't had time to keep up with it since I moved from doing private consulting back into the world of full-time employment.
 
+## TODO
+
+Ideas which may or may not be added to the script in the future.
+
+* `da_type = daily`
+    * override some other settings?
+        * `da_mcal_pos = sw`
+        * `da_h1_format = "%Y-%m-%d"`
+    * add boxes in top row for start/stop/total times
+
+* Cover/title page
+
+* Figure out issue with first page not showing up in TOC - [link](https://github.com/kg4zow/rm2-scripts/issues/1)
+
 ## License
 
 Each script is covered by its own license, as explained in that script's `README.md` file. They all have licenses which make them free to use, both as in "free beer" (i.e. zero pricetag) and "free speech" (i.e. you get the source, and you're free to share them with others, usually with the only restriction being that my original copyright notice has to be shared as well).
