@@ -10,6 +10,7 @@
 # 2023-11-01 jms1
 #   - adding default config file location
 #   - expanding '$HOME' in font_name value
+#   - adding 'daily' daily page type
 #
 ###############################################################################
 #
@@ -159,6 +160,7 @@ sub init_config()
 
     $cfg{ 'da_type'         } = ''          ;
     $cfg{ 'da_pitch'        } = 18          ;
+    $cfg{ 'da_ch_size'      } = 10          ;
 
     $cfg{ 'da_mcal_pos'     } = ''          ;
     $cfg{ 'da_mcal_h_pt'    } = 72          ;
@@ -230,12 +232,15 @@ mo_sd_size      = $cfg{'mo_sd_size'}
 # - headers - strftime() format and font size for headers
 #   - h1 is lower line, default date
 #   - h2 is upper line, default day of week
-# - how to fill the bulk of the page ("lines", "dots", or "blank")
+# - how to fill the bulk of the page ("lines", "dots", "daily", or "blank")
 # - for lines/dots, how far they should be from each other (points)
 # - small month calendar
 #   - position ("ne", "nw", "sw", "se") or none ("")
 #   - calendar height and width in points (72 points == 1 inch)
 #   - font sizes for month name and dates (which are also in points)
+#
+# Note: using "da_mcal_pos = nw" with "da_type = daily" will mess up the
+# column widths on the "daily" page. (I normally use "ne".)
 
 da_h1_format    = "$cfg{'da_h1_format'}"
 da_h1_size      = $cfg{'da_h1_size'}
@@ -244,6 +249,7 @@ da_h2_size      = $cfg{'da_h2_size'}
 
 da_type         = "$cfg{'da_type'}"
 da_pitch        = $cfg{'da_pitch'}
+da_ch_size      = $cfg{'da_ch_size'}
 
 da_mcal_pos     = $cfg{'da_mcal_pos'}
 da_mcal_h_pt    = $cfg{'da_mcal_h_pt'}
@@ -623,7 +629,8 @@ sub read_config($)
     unless (    ( $cfg{'da_type'} eq ''      )
              || ( $cfg{'da_type'} eq 'blank' )
              || ( $cfg{'da_type'} eq 'dots'  )
-             || ( $cfg{'da_type'} eq 'lines' ) )
+             || ( $cfg{'da_type'} eq 'lines' )
+             || ( $cfg{'da_type'} eq 'daily' ) )
     {
         print "ERROR: invalid 'da_type' value '" , $cfg{'da_type'} , "'\n" ;
         $fail ++ ;
@@ -1637,9 +1644,9 @@ sub setpage_da($$$$)
 
     ############################################################
     # Beyond this would be any "filling" in the page's usable area -
-    # lines, dots, whatever suits.
+    # lines, dots, daily ... whatever suits.
 
-    if ( $cfg{'da_type'} =~ m|^lines?$| )
+    if ( $cfg{'da_type'} eq 'lines' )
     {
         ########################################
         # Lines every so often. Indent from margins.
@@ -1677,7 +1684,7 @@ sub setpage_da($$$$)
         $gr->restore() ;
     }
 
-    elsif ( $cfg{'da_type'} =~ m|^dots?$| )
+    elsif ( $cfg{'da_type'} eq 'dots' )
     {
         ########################################
         # Dots every so often. Ignore margins.
@@ -1717,6 +1724,106 @@ sub setpage_da($$$$)
         $gr->stroke() ;
         $gr->restore() ;
 
+    }
+
+    elsif ( $cfg{'da_type'} eq 'daily' )
+    {
+        my $gr = $page->graphics() ;
+        $gr->save() ;
+        $gr->line_width( 0.5 ) ;
+        $gr->stroke_color( '#000000' ) ;
+        $gr->fill_color( '#E0E0E0' ) ;
+
+        ########################################
+        # Column header line
+
+        my $da_ch_size = $cfg{'da_ch_size'} ;
+        my $cl_y_pt = $hline_y_pt - $da_ch_size ;
+
+        $gr->rectangle( $ul1 , $cl_y_pt , $ur1 , $hline_y_pt ) ;
+        $gr->paint() ;
+
+        ########################################
+        # Columns
+
+        my $da_pitch = $cfg{'da_pitch'} ;
+
+        my $tx = $page->text() ;
+        $tx->font( $font , $da_ch_size ) ;
+
+        my $cl1 = $ul1 + $da_pitch ;
+        center_text( $page , '?' , $da_ch_size , $ul1 , $cl1 , $cl_y_pt ) ;
+
+        my $w2 = $tx->text_width( ' Time/Ticket ' ) ;
+        if ( $w2 < 72 )
+        {
+            $w2 = 72 ;
+        }
+        my $cl2 = $cl1 + $w2 ;
+        center_text( $page , ' Time/Ticket ' , $da_ch_size , $cl1 , $cl2 , $cl_y_pt ) ;
+
+        my $w3 = $tx->text_width( ' Rel ' ) ;
+        my $cl3 = $cl2 + $w3 ;
+        center_text( $page , ' Rel ' , $da_ch_size , $cl2 , $cl3 , $cl_y_pt ) ;
+
+        left_text( $page , ' Description' , $da_ch_size , $cl3 , $cl_y_pt ) ;
+
+        ########################################
+        # Vertical lines between columns
+
+        my $lby = 0 ;
+        if ( ( $cl1 <= $ul3 ) || ( $cl1 >= $ur3 ) )
+        {
+            $lby = $uy2 ;
+        }
+        $gr->move( $cl1 , $hline_y_pt )->line( $cl1 , $lby ) ;
+
+        $lby = 0 ;
+        if ( ( $cl2 <= $ul3 ) || ( $cl2 >= $ur3 ) )
+        {
+            $lby = $uy2 ;
+        }
+        $gr->move( $cl2 , $hline_y_pt )->line( $cl2 , $lby ) ;
+
+        $lby = 0 ;
+        if ( ( $cl3 <= $ul3 ) || ( $cl3 >= $ur3 ) )
+        {
+            $lby = $uy2 ;
+        }
+        $gr->move( $cl3 , $hline_y_pt )->line( $cl3 , $lby ) ;
+
+        $gr->stroke() ;
+
+        ########################################
+        # Lines
+
+        $gr->stroke_color( '#C0C0C0' ) ;
+
+        my $zy = $cl_y_pt - $da_pitch ;
+        while ( $zy > 0 )
+        {
+            my $ll = $ul2 ;
+            my $lr = $ur2 ;
+
+            if ( $zy >= $uy1 )
+            {
+                $ll = $ul1 ;
+                $lr = $ur1 ;
+            }
+            elsif ( $zy <= $uy2 )
+            {
+                $ll = $ul3 ;
+                $lr = $ur3 ;
+            }
+
+            $gr->move( $ll , $zy )->line( $lr , $zy ) ;
+
+            $zy -= $da_pitch ;
+        }
+
+        $gr->stroke() ;
+
+        $gr->restore() ;
     }
 
 }
