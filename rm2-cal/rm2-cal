@@ -97,8 +97,12 @@ line can be one of the following:
 * YYYY-MM-xx    One month page, plus (28-31) day pages.
 * YYYY-xx-xx    One year page, plus 12 (month page plus (28-31) day pages).
 
-Pages and output filenames specified on the command line will override the
-config file.
+You can also specify a range of years, months, or days, by joining the first
+and last year/month/day using a comma. For example, using '2023,2025' would
+generate three year pages.
+
+Pages and output filenames specified on the command line will override values
+read from a config file.
 
 Options:
 
@@ -106,13 +110,22 @@ Options:
         and whether or not cross-page links should be generated, as well as
         the list of pages to be included.
 
+        If this option is not used, the script will look for a config file
+        in the following locations. The first file it finds will be used.
+
+        - \$XDG_CONFIG_HOME/rm2-cal/rm2-cal.cfg
+        - \$HOME/.config/rm2-cal/rm2-cal.cfg
+
+        If no config file is used, the script has default values which make
+        the generated PDFs look okay to me.
+
 -g      Generate a sample config file. Save and edit this output to start a
         new config file.
 
 -h      Show this help message.
 
 See https://github.com/kg4zow/rm2-scripts/rm2-cal/README.md for more detailed
-information.
+information, including a list of the config options and what they control.
 
 EOF
 
@@ -268,7 +281,7 @@ da_mcal_dsize   = $cfg{'da_mcal_dsize'}
 # - YYYY-MM-xx      One month page, plus (28-31) day pages.
 # - YYYY-xx-xx      One year page, plus 12 (month page plus (23-31) day pages).
 
-2023-xx-xx
+#2023-xx-xx
 EOF
 
     exit 0 ;

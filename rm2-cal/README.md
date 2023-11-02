@@ -57,19 +57,32 @@ The order of the command line options, date specifiers, and output filename is n
 
 ### Configuration files
 
-The script has an option to print a sample config file, which you can save to a file and edit the file to make your own configuration with the specific settings you like. Having a config file can save you some typing, and make it easier to create the same *kind* of calendar in the future.
+The script has a lot of possible options to customize the generated PDFs. You *could* specify them all on the command line, but it's easier to create a config file with the options you like for your own PDFs, and store your preferences there.
+
+The script will look for a config file in the following locations. The *first* file it finds is the one it will use.
+
+* File specified with the `-c` option
+* `$XDG_CONFIG_HOME/rm2-cal-rm2-cal.cfg`
+* `$HOME/.config/rm2-cal/rm2-cal.cfg`
+
+Config options specified on the command line will override the selected config file.
+
+The script has an option to *print* a sample config file. You can save this to a file and edit the file to make your own configuration with the specific settings you like. Having a config file can save you some typing, and make it easier to create the same *kind* of calendar in the future.
 
 ```
-$ ./rm2-cal -g > config.txt
+$ mkdir -p ~/.config/rm2-cal/rm2-cal.cfg
+$ ./rm2-cal -g > ~/.config/rm2-cal/rm2-cal.cfg
 ```
 
 The file it generates is all human-readable text. Each *line* in the file is treated as either a config option or a date specifier (explained below). Comments (starting with "`#`") and blank lines are ignored. Extra whitespace at the beginning or end of each line are also ignored.
 
-To *use* a config file, specify it on the command line with the `-c` option, like so:
+To *use* a config file, you can specify it on the command line with the `-c` option, like so:
 
 ```
-$ ./rm2-cal -c config.txt 2023-09,2024-12 output.pdf
+$ ./rm2-cal -c custom.cfg 2023-09,2024-12 output.pdf
 ```
+
+You can also store the config file in `$XDG_CONFIG_HOME/rm2-cal-rm2-cal.cfg` or `$HOME/.config/rm2-cal/rm2-cal.cfg`, and if the script is run *without* a `-c` option, it will use the config file automatically.
 
 ## Date specifiers
 
@@ -223,8 +236,11 @@ The titles of the day pages have two lines, with the "second" line *above* the f
     * `blank` (or empty string) - leave the area blank
     * `lines` - horizontal lines
     * `dots` - regularly spaced dots
+    * `daily` - the daily log sheets I use for work. (I work in software development.)
 
 * **`da_pitch`** (points, default 18) - if `da_type` specifies lines or dots, how far apart those lines or dots should be from each other. The default, 18, results in the lines or dots being &#xBC; inch apart. Larger values will make more space between the lines or dots.
+
+* **`da_ch_size`** (points, default 10) - if `da_type` specifies the "daily" type, this is the text size of the column headers.
 
 * **`da_mcal_pos`** (string, default empty) - if non-empty, a small calendar of the current month will be added to one of the four corners of the page. The value can be:
 
@@ -233,6 +249,8 @@ The titles of the day pages have two lines, with the "second" line *above* the f
     * `nw` - northwest (upper left) corner
     * `se` - southeast (lower right) corner
     * `sw` - southwest (lower left) corner
+
+    &#x26A0;&#xFE0F; If `da_type` is "daily", don't use `nw` here. If you do, it will mess up the column headers.
 
 * **`da_mcal_h_pt`** (points, default 72) - the height of the small calendar.
 
