@@ -314,5 +314,17 @@ THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR I
 I have the following ideas for future versions of this script.
 
 * Landscape view
+
 * Left-handed files
+
 * Re-write it in Golang, to make it easier for others to run (i.e. so people won't have to mess around with installing CPAN modules)
+
+* For `da_type = daily`
+    * override some other settings?
+        * `da_mcal_pos = sw`
+        * `da_h1_format = "%Y-%m-%d"`
+    * add boxes in top row for start/stop/total times
+
+* Cover/title page
+
+* Figure out issue with first page not showing up in TOC - [link](https://github.com/kg4zow/rm2-scripts/issues/1)
