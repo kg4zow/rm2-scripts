@@ -328,3 +328,7 @@ I have the following ideas for future versions of this script.
 * Cover/title page
 
 * Figure out issue with first page not showing up in TOC - [link](https://github.com/kg4zow/rm2-scripts/issues/1)
+
+* Option to specify only certain days of the week (i.e. Mon-Fri only), obviously default to "every day"
+
+    * mini-calendars: if target date doesn't exist in the file, use "lighter" text?
