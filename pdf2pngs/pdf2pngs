@@ -1,0 +1,128 @@
+#!/bin/bash
+#
+# pdf2pngs
+# John Simpson <jms1@jms1.net> 2024-01-01
+#
+# Split a PDF file into a series of PNG files, for use as templates on a
+# reMarkable tablet.
+#
+# Requires Ghostscript
+# - macOS:
+#   - Homebrew: https://brew.sh/
+#   - brew install gs
+# - Linux: usually available from your distro's package repository
+#   - CentOS/Fedora/etc: yum install ghostscript
+#   - Debian/Ubuntu/etc: apt install ghostscript
+# - windows: no idea, see https://ghostscript.readthedocs.io/
+#
+# Note that my first attempt at this used ImageMagick. I was able to produce
+# PNG files, but they look *really* bad - it looks like it isn't able to do
+# anti-aliasing correctly. However, I was able to use Ghostscript, and the
+# files it produces look a LOT better, so that's what I'm sticking with.
+#
+# The original ImageMagick commands are still below, commented out, if
+# anybody wants to play with them.
+#
+###############################################################################
+#
+# The MIT License (MIT)
+#
+# Copyright (C) 2024 John Simpson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+########################################
+# Path to the 'gs' executable. This may need to be changed if it isn't
+# in your PATH, or if it has a name other than 'gs'.
+
+GS="gs"
+
+########################################
+# Size and DPI of tablet screen
+# - these values are correct for reMarkable 1 and 2 tablets
+
+OUT_W=1404
+OUT_H=1872
+OUT_D=228
+
+###############################################################################
+###############################################################################
+###############################################################################
+
+########################################
+# Get input filename
+
+INFILE="${1:?ERROR: no input filename specified}"
+
+if [[ ! -f "$INFILE" ]]
+then
+    echo "ERROR: '$INFILE' does not exist or is not a file"
+    exit 1
+fi
+
+########################################
+# Get "base" filename, without the '.pdf' extension
+
+TMP1="${INFILE%.pdf}"
+BASE="${TMP1%.PDF}"
+
+if [[ "$BASE" == "$INFILE" ]]
+then
+    echo "ERROR: input filename must end with '.pdf' or '.PDF'"
+    exit 1
+fi
+
+########################################
+# Commands below this point will be printed before being executed.
+
+set -x
+
+########################################
+# Do the deed - using ImageMagick
+# - works, but output images are NOT pretty
+
+### PAGES="$( magick identify -format '%n\n' "$INFILE" | head -1 )"
+###
+### magick "$INFILE" \
+###     -colorspace gray \
+###     -depth      8 \
+###     -antialias  \
+###     -resize     "${OUT_W}x${OUT_H}" \
+###     -density    "$(( 5 * OUT_D ))" \
+###     -flatten    \
+###     "${BASE##*/}.%0${#PAGES}d.png"
+
+########################################
+# Do the deed - using 'gs'
+# - also works, images look MUCH better
+
+PAGES="$( "$GS" -q -dNODISPLAY --permit-file-read="$INFILE" \
+            -c "($INFILE) (r) file runpdfbegin pdfpagecount = quit" )"
+
+"$GS" \
+    -dBATCH \
+    -dNOPAUSE \
+    -dSAFER \
+    -dPDFFitPage \
+    -sDEVICE=pnggray \
+    -g"${OUT_W}x${OUT_H}" \
+    -sOutputFile="${BASE##*/}.%0${#PAGES}d.png" \
+    "${INFILE}"
