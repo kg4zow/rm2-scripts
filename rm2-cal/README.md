@@ -70,7 +70,7 @@ Config options specified on the command line will override the selected config f
 The script has an option to *print* a sample config file. You can save this to a file and edit the file to make your own configuration with the specific settings you like. Having a config file can save you some typing, and make it easier to create the same *kind* of calendar in the future.
 
 ```
-$ mkdir -p ~/.config/rm2-cal/rm2-cal.cfg
+$ mkdir -p ~/.config/rm2-cal
 $ ./rm2-cal -g > ~/.config/rm2-cal/rm2-cal.cfg
 ```
 
@@ -173,7 +173,7 @@ Values within a config option (i.e. the part after the `=`) may be quoted, and *
 * **`menu_width_px`** (pixels, default 104) - the width of the area on the left which is covered up by the reMarkable menu bar. This will be different depending on which reMarkable firmware you're using.
 
     * 3.0.5.56 &#x2192; 120
-    * 3.5.2.1807 &#x2192; 104
+    * 3.5.2.1807 and later &#x2192; 104
 
 * **`close_width_px`** (pixels, default 104) - the width of the "box" on the top right around the reMarkable "&#x2A02;" (close) button.
 
