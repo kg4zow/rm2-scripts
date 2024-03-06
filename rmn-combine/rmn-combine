@@ -1,0 +1,742 @@
+#!/usr/bin/env perl
+#
+# rmn-combine
+# John Simpson <jms1@jms1.net> 2024-03-03
+#
+# Combine the pages from one or more '.rmn' (reMarkable notebook archive)
+# files into a single output 'rmn' file.
+#
+# Last update: 2024-03-06
+# - make sure page UUIDs are unique in the output file
+#
+###############################################################################
+#
+# The MIT License (MIT)
+#
+# Copyright (C) 2024 John Simpson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+require 5.005 ;
+use strict ;
+use warnings ;
+
+use Getopt::Std ;
+use JSON ;
+
+########################################
+# global variables
+
+my %opt             = () ;      # getopts
+my $outfile         = '' ;      # -o:   output filename
+my $set_x           = 0 ;       # -x    runit() shows commands
+my $builtin_only    = 0 ;       # -b    builtin templates only
+my $odoc_name       = '' ;      # -n:   output file visibleName
+
+my @infiles         = () ;      # input filenames
+my $owdir           = '' ;      # output work directory
+my $odoc_uuid       = '' ;      # UUID for output document
+my @o_page_seq      = () ;      # page UUID sequence
+my %op_template     = () ;      # template for each page
+
+my $now             = time() ;
+
+my %builtin_templates =
+(
+    'Blank'                 => 1 ,
+    'Isometric'             => 1 ,
+    'LS Calligraphy large'  => 1 ,
+    'LS Calligraphy medium' => 1 ,
+    'LS Checklist double'   => 1 ,
+    'LS Checklist'          => 1 ,
+    'LS Dayplanner'         => 1 ,
+    'LS Dots bottom'        => 1 ,
+    'LS Dots top'           => 1 ,
+    'LS Four storyboards'   => 1 ,
+    'LS Grid bottom'        => 1 ,
+    'LS Grid margin large'  => 1 ,
+    'LS Grid margin med'    => 1 ,
+    'LS Grid top'           => 1 ,
+    'LS Lines bottom'       => 1 ,
+    'LS Lines medium'       => 1 ,
+    'LS Lines small'        => 1 ,
+    'LS Lines top'          => 1 ,
+    'LS Margin medium'      => 1 ,
+    'LS Margin small'       => 1 ,
+    'LS One storyboard 2'   => 1 ,
+    'LS One storyboard'     => 1 ,
+    'LS Piano sheet large'  => 1 ,
+    'LS Piano sheet medium' => 1 ,
+    'LS Piano sheet small'  => 1 ,
+    'LS Two storyboards'    => 1 ,
+    'LS Week US'            => 1 ,
+    'LS Week'               => 1 ,
+    'Notes'                 => 1 ,
+    'P Bass tab'            => 1 ,
+    'P Black dots'          => 1 ,
+    'P Black grid'          => 1 ,
+    'P Black lines'         => 1 ,
+    'P Black'               => 1 ,
+    'P Calligraphy large'   => 1 ,
+    'P Calligraphy medium'  => 1 ,
+    'P Checklist'           => 1 ,
+    'P Cornell'             => 1 ,
+    'P Day'                 => 1 ,
+    'P Dots S bottom'       => 1 ,
+    'P Dots S top'          => 1 ,
+    'P Dots S'              => 1 ,
+    'P Dots large'          => 1 ,
+    'P Four storyboards'    => 1 ,
+    'P Grid bottom'         => 1 ,
+    'P Grid large'          => 1 ,
+    'P Grid margin large'   => 1 ,
+    'P Grid margin med'     => 1 ,
+    'P Grid medium'         => 1 ,
+    'P Grid small'          => 1 ,
+    'P Grid top'            => 1 ,
+    'P Guitar chords'       => 1 ,
+    'P Guitar tab'          => 1 ,
+    'P Hexagon large'       => 1 ,
+    'P Hexagon medium'      => 1 ,
+    'P Hexagon small'       => 1 ,
+    'P Lined bottom'        => 1 ,
+    'P Lined heading'       => 1 ,
+    'P Lined top'           => 1 ,
+    'P Lines large'         => 1 ,
+    'P Lines medium'        => 1 ,
+    'P Lines small'         => 1 ,
+    'P Margin large'        => 1 ,
+    'P Margin medium'       => 1 ,
+    'P Margin small'        => 1 ,
+    'P One storyboard'      => 1 ,
+    'P Piano sheet large'   => 1 ,
+    'P Piano sheet medium'  => 1 ,
+    'P Piano sheet small'   => 1 ,
+    'P Two storyboards'     => 1 ,
+    'P US College'          => 1 ,
+    'P US Legal'            => 1 ,
+    'P Week 2'              => 1 ,
+    'P Week US'             => 1 ,
+    'P Week'                => 1 ,
+    'Perspective1'          => 1 ,
+    'Perspective2'          => 1 ,
+) ;
+
+###############################################################################
+#
+# usage
+
+sub usage(;$)
+{
+    my $msg = ( shift || '' ) ;
+
+    print <<EOF ;
+$0 [options] -o OUTPUT.rmn INPUT.rmn [...]
+
+Combine the pages from multiple '.rmn' files into a single '.rmn' file.
+
+-b      Built-in templates only. Any input pages using templates other than
+        the ones built into the reMarkable software will have 'Blank' as the
+        template in the output file.
+
+-n ___  Specify the display name of the output file. If not specified, the
+        output filename (withouth the '.rmn') will be used.
+
+-o ___  Specify the name of the output file to be created. If it already
+        exists, the existing file will be renamed first.
+
+-x      Show any external commands being executed.
+
+-h      Show this help screen.
+
+EOF
+
+    if ( $msg ne '' )
+    {
+        print $msg ;
+        exit 1 ;
+    }
+
+    exit 0 ;
+}
+
+###############################################################################
+#
+# Generate a UUID
+#
+# Perl's rand() function is NOT cryptographically secure, but all we're doing
+# is ensuring that the page UUIDs are unique within the output file, so this
+# is good enough.
+
+sub generate_uuid()
+{
+    my $rv = '' ;
+
+    $rv .= sprintf( '%04x' , int( rand( 65536 ) ) ) ;
+    $rv .= sprintf( '%04x' , int( rand( 65536 ) ) ) ;
+    $rv .= '-' ;
+    $rv .= sprintf( '%04x' , int( rand( 65536 ) ) ) ;
+    $rv .= '-' ;
+    $rv .= sprintf( '%04x' , int( rand( 65536 ) ) ) ;
+    $rv .= '-' ;
+    $rv .= sprintf( '%04x' , int( rand( 65536 ) ) ) ;
+    $rv .= '-' ;
+    $rv .= sprintf( '%04x' , int( rand( 65536 ) ) ) ;
+    $rv .= sprintf( '%04x' , int( rand( 65536 ) ) ) ;
+    $rv .= sprintf( '%04x' , int( rand( 65536 ) ) ) ;
+
+    return $rv ;
+}
+
+###############################################################################
+#
+# Print and run a command
+
+sub runit($)
+{
+    my $cmd = shift ;
+
+    $set_x && print "+ $cmd\n" ;
+    return system( $cmd ) ;
+}
+
+###############################################################################
+#
+# Recursively delete a directory and its contents
+# - also works for a single file
+
+sub rm_r($) ;
+sub rm_r($)
+{
+    my $dir  =   shift ;
+
+    if ( -d $dir )
+    {
+        opendir( my $dh , $dir )
+            or die "ERROR: opendir('$dir'): $!\n" ;
+        while ( my $f = readdir $dh )
+        {
+            next if ( ( $f eq '.' ) || ( $f eq '..' ) ) ;
+            if ( -d "$dir/$f" )
+            {
+                rm_r( "$dir/$f" ) ;
+            }
+            else
+            {
+                unlink( "$dir/$f" )
+                    or die "unlink('$dir/$f'): $!\n" ;
+            }
+        }
+        closedir $dh ;
+
+        rmdir $dir
+            or die "rmdir('$dir'): $!\n" ;
+    }
+    else
+    {
+        unlink( $dir )
+            or die "unlink('$dir'): $!\n" ;
+    }
+}
+
+###############################################################################
+#
+# Add the pages from an input file, to the document we're building
+
+sub add_infile($)
+{
+    my $infile = shift ;
+
+    print "READ    $infile\n" ;
+
+    ############################################################
+    # Read input file to temp directory
+
+    ( -d "$owdir/in" ) && rm_r( "$owdir/in" ) ;
+
+    mkdir( "$owdir/in" , 0755 ) ;
+    runit( "tar xzf '$infile' -C '$owdir/in'" ) ;
+
+    ############################################################
+    # Find input file's UUID
+
+    my $i_uuid = '' ;
+
+    opendir( D , "$owdir/in" )
+        or die( "ERROR: opendir('$owdir/in'): $!\n" ) ;
+    while ( my $f = readdir( D ) )
+    {
+        if ( $f =~ m|^([0-9a-fA-F-]+)\.metadata$| )
+        {
+            $i_uuid = $1 ;
+            last ;
+        }
+    }
+    closedir D ;
+
+    if ( $i_uuid eq '' )
+    {
+        die "ERROR: unable to find UUID for input file '$infile'\n" ;
+    }
+
+    ############################################################
+    # Read input file's UUID.content file, find list of page UUIDs
+
+    my $i_content_text  = '' ;      # raw JSON file contents
+    my @i_page_seq      = () ;      # input page id sequence
+
+    open( I , "$owdir/in/$i_uuid.content" )
+        or die "ERROR: open('$owdir/in/$i_uuid.content'): $!\n" ;
+    while ( my $line = <I> )
+    {
+        $i_content_text .= $line ;
+    }
+    close I ;
+
+    ########################################
+    # Parse JSON
+
+    my $j = decode_json( $i_content_text ) ;
+
+    ########################################
+    # Process pages
+    # - there are multiple versions of UUID.content structure out there
+
+    if ( exists( $j->{'cPages'} ) )
+    {
+        my %seq = () ;
+        for my $p ( @{$j->{'cPages'}->{'pages'}} )
+        {
+            my $ip_id   = $p->{'id'} ;
+            my $tmpl    = $p->{'template'}->{'value'} ;
+            my $del     = ( $p->{'deleted'}->{'value'} || 0 ) ;
+
+            ########################################
+            # skip deleted pages
+
+            if ( $del )
+            {
+                printf "  SKIP    %s\n" , $ip_id ;
+                next ;
+            }
+
+            ########################################
+            # If page UUID arleady exists in output file, pick a new UUID
+
+            my $op_id = $ip_id ;
+            while ( exists $op_template{$op_id} )
+            {
+                $op_id = generate_uuid() ;
+            }
+
+            ########################################
+            # Tell the user about the page
+
+            if ( $ip_id eq $op_id )
+            {
+                printf "  PAGE    %s\n" , $ip_id ;
+            }
+            else
+            {
+                printf "  PAGE    %s -> %s\n" , $ip_id , $op_id ;
+            }
+
+            ########################################
+            # Move the page's files
+
+            for my $ifile ( glob( "$owdir/in/$i_uuid/$ip_id*" ) )
+            {
+                my $ofile = $ifile ;
+                $ofile =~ s|$ip_id|$op_id| ;
+                $ofile =~ s|^.+/|$owdir/$odoc_uuid/| ;
+
+                my $odisp = $ofile ;
+                $odisp =~ s|^.+/|| ;
+
+                if ( $ip_id eq $op_id )
+                {
+                    print "    FILE    $odisp\n" ;
+                }
+                else
+                {
+                    my $idisp = $ifile ;
+                    $idisp =~ s|^.+/|| ;
+                    print "    FILE    $idisp -> $odisp\n" ;
+                }
+
+                rename( $ifile , $ofile ) ;
+            }
+
+            ########################################
+            # Add the page to the output page sequence
+
+            push( @o_page_seq , $op_id ) ;
+            $op_template{$op_id} = $tmpl ;
+        }
+    }
+    else
+    {
+        ########################################
+        # Read UUID.pagedata file to get template names
+
+        my @templates = () ;
+
+        if ( open( I , '<' , "$owdir/in/$i_uuid.pagedata" ) )
+        {
+            while ( my $line = <I> )
+            {
+                chomp $line ;
+                push( @templates , $line ) ;
+            }
+        }
+        close I ;
+
+        ########################################
+        # Process the pages
+
+        my $n = 0 ;
+        for my $ip_id ( @{$j->{'pages'}} )
+        {
+            ########################################
+            # If page UUID arleady exists in output file, pick a new UUID
+
+            my $op_id = $ip_id ;
+            while ( exists $op_template{$op_id} )
+            {
+                $op_id = generate_uuid() ;
+            }
+
+            ########################################
+            # Tell the user about the page
+
+            if ( $ip_id eq $op_id )
+            {
+                printf "  PAGE    %s\n" , $ip_id ;
+            }
+            else
+            {
+                printf "  PAGE    %s -> %s\n" , $ip_id , $op_id ;
+            }
+
+            ########################################
+            # Move the page's files
+
+            for my $ifile ( glob( "$owdir/in/$i_uuid/$ip_id*" ) )
+            {
+                my $ofile = $ifile ;
+                $ofile =~ s|$ip_id|$op_id| ;
+                $ofile =~ s|^.+/|$owdir/$odoc_uuid/| ;
+
+                my $odisp = $ofile ;
+                $odisp =~ s|^.+/|| ;
+
+                if ( $ip_id eq $op_id )
+                {
+                    print "    FILE    $odisp\n" ;
+                }
+                else
+                {
+                    my $idisp = $ifile ;
+                    $idisp =~ s|^.+/|| ;
+                    print "    FILE    $idisp -> $odisp\n" ;
+                }
+
+                rename( $ifile , $ofile ) ;
+            }
+
+            ########################################
+            # Add the page to the output page sequence
+
+            push( @o_page_seq , $op_id ) ;
+            $op_template{$op_id} = ( $templates[$n++] || 'Blank' ) ;
+        }
+    }
+
+}
+
+###############################################################################
+#
+# Generate contents of UUID.metadata file
+
+sub generate_metadata()
+{
+    return <<EOF ;
+{
+    "deleted": false,
+    "lastModified": "${now}000",
+    "lastOpened": "${now}000",
+    "lastOpenedPage": 0,
+    "metadatamodified": false,
+    "modified": true,
+    "parent": "",
+    "pinned": false,
+    "synced": false,
+    "type": "DocumentType",
+    "version": 0,
+    "visibleName": "$odoc_name"
+}
+EOF
+}
+
+###############################################################################
+#
+# Generate contents of UUID.content file
+
+sub generate_content()
+{
+    my $pages = '        "'
+        . join( "\",\n        \"" , @o_page_seq )
+        . '"' ;
+
+    my $pageCount = @o_page_seq ;
+
+    return <<EOF ;
+{
+    "coverPageNumber": -1,
+    "dummyDocument": false,
+    "extraMetadata": {
+        "LastBallpointColor": "Black",
+        "LastBallpointSize": "2",
+        "LastBallpointv2Color": "Black",
+        "LastBallpointv2Size": "2",
+        "LastCalligraphyColor": "Black",
+        "LastCalligraphySize": "2",
+        "LastClearPageColor": "Black",
+        "LastClearPageSize": "2",
+        "LastEraseSectionColor": "Black",
+        "LastEraseSectionSize": "2",
+        "LastEraserColor": "Black",
+        "LastEraserSize": "2",
+        "LastEraserTool": "Eraser",
+        "LastFinelinerColor": "Black",
+        "LastFinelinerSize": "2",
+        "LastFinelinerv2Color": "Black",
+        "LastFinelinerv2Size": "2",
+        "LastHighlighterColor": "Black",
+        "LastHighlighterSize": "2",
+        "LastHighlighterv2Color": "Black",
+        "LastHighlighterv2Size": "2",
+        "LastMarkerColor": "Black",
+        "LastMarkerSize": "2",
+        "LastMarkerv2Color": "Black",
+        "LastMarkerv2Size": "2",
+        "LastPaintbrushColor": "Black",
+        "LastPaintbrushSize": "2",
+        "LastPaintbrushv2Color": "Black",
+        "LastPaintbrushv2Size": "2",
+        "LastPen": "SharpPencilv2",
+        "LastPencilColor": "Black",
+        "LastPencilSize": "2",
+        "LastPencilv2Color": "Black",
+        "LastPencilv2Size": "2",
+        "LastReservedPenColor": "Black",
+        "LastReservedPenSize": "2",
+        "LastSelectionToolColor": "Black",
+        "LastSelectionToolSize": "2",
+        "LastSharpPencilColor": "Black",
+        "LastSharpPencilSize": "2",
+        "LastSharpPencilv2Color": "Black",
+        "LastSharpPencilv2Size": "2",
+        "LastSolidPenColor": "Black",
+        "LastSolidPenSize": "2",
+        "LastTool": "SharpPencilv2",
+        "LastUndefinedColor": "Black",
+        "LastUndefinedSize": "1",
+        "LastZoomToolColor": "Black",
+        "LastZoomToolSize": "2"
+    },
+    "fileType": "notebook",
+    "fontName": "",
+    "lineHeight": -1,
+    "margins": 100,
+    "orientation": "portrait",
+    "pageCount": $pageCount,
+    "pages": [
+$pages
+    ],
+    "textAlignment": "left",
+    "textScale": 1,
+    "transform": {
+        "m11": 1,
+        "m12": 0,
+        "m13": 0,
+        "m21": 0,
+        "m22": 1,
+        "m23": 0,
+        "m31": 0,
+        "m32": 0,
+        "m33": 1
+    }
+}
+EOF
+}
+
+###############################################################################
+#
+# Generate contents of UUID.pagedata file
+
+sub generate_pagedata()
+{
+    my $rv = '' ;
+
+    for my $uuid ( @o_page_seq )
+    {
+        my $n = ( $op_template{$uuid} || 'Blank' ) ;
+
+        if ( $builtin_only )
+        {
+            unless ( exists $builtin_templates{$n} )
+            {
+                $n = 'Blank' ;
+            }
+        }
+
+        $rv .= "$n\n" ;
+    }
+
+    return $rv ;
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+#
+# Parse command line
+
+getopts( 'ho:n:xb' , \%opt ) ;
+$opt{'h'} && usage() ;
+$outfile        = ( $opt{'o'} || '' ) ;
+$odoc_name      = ( $opt{'n'} || '' ) ;
+$set_x          = ( $opt{'x'} ? 1 : 0 ) ;
+$builtin_only   = ( $opt{'b'} ? 1 : 0 ) ;
+
+if ( $outfile eq '' )
+{
+    if ( @ARGV > 0 )
+    {
+        usage "ERROR: no output file specified\n" ;
+    }
+
+    usage() ;
+}
+elsif ( @ARGV < 1 )
+{
+    usage "ERROR: no input files specified\n" ;
+}
+
+push( @infiles , @ARGV ) ;
+
+########################################
+# If no display name was specified,
+# extract a name from the output filename
+
+if ( $odoc_name eq '' )
+{
+    $odoc_name = $outfile ;
+    $odoc_name =~ s|\.rmn$||i ;
+    $odoc_name =~ s|^.*/|| ;
+}
+
+########################################
+# Get current timestamp
+
+my @d = gmtime( $now ) ;
+my $now_ts = sprintf( '%04d-%02d-%02dT%02d:%02d:%02dZ' ,
+    $d[5]+1900 , $d[4]+1 , $d[3] , $d[2] , $d[1] , $d[0] ) ;
+
+###############################################################################
+#
+# Create working directory for the output file
+
+$owdir = './work' ;
+if ( -e $owdir )
+{
+    die "ERROR: output work directory '$owdir' already exists\n" ;
+}
+
+print "MKDIR   $owdir\n" ;
+mkdir( $owdir , 0755 )
+    or die "ERROR: mkdir('$owdir'): $!\n" ;
+
+########################################
+# Generate output document's UUID and create its directories
+
+$odoc_uuid = generate_uuid() ;
+
+print "MKDIR   $owdir/$odoc_uuid\n" ;
+mkdir( "$owdir/$odoc_uuid" , 0755 )
+    or die "ERROR: mkdir('$owdir/$odoc_uuid'): $!\n" ;
+
+###############################################################################
+#
+# Process the input files
+
+while ( my $infile = shift( @infiles ) )
+{
+    add_infile( $infile ) ;
+}
+
+rm_r "$owdir/in" ;
+
+###############################################################################
+#
+# Write the document's metadata files
+
+print "WRITE   $owdir/$odoc_uuid.metadata\n" ;
+open( O , '>' , "$owdir/$odoc_uuid.metadata" )
+    or die( "ERROR: >$owdir/$odoc_uuid.metadata\n" ) ;
+print O generate_metadata() ;
+close O ;
+
+print "WRITE   $owdir/$odoc_uuid.content\n" ;
+open( O , '>' , "$owdir/$odoc_uuid.content" )
+    or die( "ERROR: >$owdir/$odoc_uuid.content\n" ) ;
+print O generate_content() ;
+close O ;
+
+print "WRITE   $owdir/$odoc_uuid.pagedata\n" ;
+open( O , '>' , "$owdir/$odoc_uuid.pagedata" )
+    or die( "ERROR: >$owdir/$odoc_uuid.pagedata\n" ) ;
+print O generate_pagedata() ;
+close O ;
+
+###############################################################################
+#
+# Create the output file
+
+if ( -e $outfile )
+{
+    print "RENAME  $outfile -> $outfile.$now_ts.$$\n" ;
+    rename( $outfile , "$outfile.$now_ts.$$" )
+        or die "ERROR: rename(): $!\n" ;
+}
+
+print "WRITE   $outfile\n" ;
+
+my $cmd = "tar czf '$outfile' -C '$owdir' --strip-components 1 ." ;
+
+$set_x = 1 ;
+runit $cmd ;
+
+########################################
+# Clean up after ourselves
+
+### rm_r( $owdir ) ;
