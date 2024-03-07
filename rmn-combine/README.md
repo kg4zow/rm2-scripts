@@ -8,7 +8,7 @@ This is just an example, I'm sure there are other reasons why somebody might nee
 
 ### Background: `.rmn` files
 
-An `.rmn` file is a gzip-compressed tarball (or "`.tar.gz`" file) containing the actual files from a reMarkable tablet's filesystem, which make up that document. Each document, and therefore each `.rmn` file, will contain several files. If you're curious, these files are explained on [this page](https://remarkable.jms1.info/info/filesystem.html) (or at least, explained as well as I've been able to figure out). If you're not interested in the technical details, just keep in mind that an `.rmn` file *contains* other files, much like a `.zip` file.
+An `.rmn` file is a tarball (or "`.tar`" file) containing the actual files from a reMarkable tablet's filesystem, which make up that document. Each document, and therefore each `.rmn` file, will contain several files. If you're curious, these files are explained on [this page](https://remarkable.jms1.info/info/filesystem.html) (or at least, explained as well as I've been able to figure out). If you're not interested in the technical details, just keep in mind that an `.rmn` file *contains* other files, much like a `.zip` file.
 
 ## Installing the script
 
