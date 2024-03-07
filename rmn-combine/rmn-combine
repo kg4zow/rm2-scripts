@@ -6,8 +6,14 @@
 # Combine the pages from one or more '.rmn' (reMarkable notebook archive)
 # files into a single output 'rmn' file.
 #
-# Last update: 2024-03-06
+# 2024-03-06
 # - make sure page UUIDs are unique in the output file
+# - first upload to github
+#
+# 2024-03-06
+# - Fixed the file formats, turns out `.rmn` files are just tarballs, and are
+#   NOT gzip-compressed. Thanks Apple, for being so "helpful" and not showing
+#   error messages.
 #
 ###############################################################################
 #
@@ -41,6 +47,7 @@ use warnings ;
 
 use Getopt::Std ;
 use JSON ;
+use File::Temp qw ( tempdir ) ;
 
 ########################################
 # global variables
@@ -167,6 +174,8 @@ Combine the pages from multiple '.rmn' files into a single '.rmn' file.
 
 -h      Show this help screen.
 
+v0.2 2024-03-06
+
 EOF
 
     if ( $msg ne '' )
@@ -273,7 +282,7 @@ sub add_infile($)
     ( -d "$owdir/in" ) && rm_r( "$owdir/in" ) ;
 
     mkdir( "$owdir/in" , 0755 ) ;
-    runit( "tar xzf '$infile' -C '$owdir/in'" ) ;
+    runit( "tar xf '$infile' -C '$owdir/in'" ) ;
 
     ############################################################
     # Find input file's UUID
@@ -666,15 +675,8 @@ my $now_ts = sprintf( '%04d-%02d-%02dT%02d:%02d:%02dZ' ,
 #
 # Create working directory for the output file
 
-$owdir = './work' ;
-if ( -e $owdir )
-{
-    die "ERROR: output work directory '$owdir' already exists\n" ;
-}
-
+$owdir = tempdir() ;
 print "MKDIR   $owdir\n" ;
-mkdir( $owdir , 0755 )
-    or die "ERROR: mkdir('$owdir'): $!\n" ;
 
 ########################################
 # Generate output document's UUID and create its directories
@@ -731,7 +733,7 @@ if ( -e $outfile )
 
 print "WRITE   $outfile\n" ;
 
-my $cmd = "tar czf '$outfile' -C '$owdir' --strip-components 1 ." ;
+my $cmd = "tar cf '$outfile' -C '$owdir' --strip-components 1 ." ;
 
 $set_x = 1 ;
 runit $cmd ;
@@ -739,4 +741,4 @@ runit $cmd ;
 ########################################
 # Clean up after ourselves
 
-### rm_r( $owdir ) ;
+rm_r( $owdir ) ;
