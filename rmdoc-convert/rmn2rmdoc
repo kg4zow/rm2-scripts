@@ -1,0 +1,142 @@
+#!/bin/bash
+#
+# rmn2rmdoc
+# John Simpson <jms1@jms1.net> 2024-04-01
+#
+# Convert an '.rmn' file to an '.rmdoc' file
+#
+###############################################################################
+#
+# The MIT License (MIT)
+#
+# Copyright (C) 2024 John Simpson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+function usage {
+    MSG="${*:-}"
+
+    cat <<EOF
+$0 [OPTIONS] INFILE [OUTFILE]
+
+Convert an RCU ".rmn" file to a reMarkable ".rmdoc" file.
+
+If OUTFILE is not specified, the script will generate the filename.
+
+-v      Show the files being unzipped and tar'd.
+
+-h      Show this help message.
+
+EOF
+
+    if [[ -n "$MSG" ]]
+    then
+        echo "$MSG"
+        exit 1
+    fi
+
+    exit 0
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+#
+# Parse the command line
+
+SHOW_MSG=true
+ZIP_Q="-q"
+TAR_V=""
+
+while getopts ':hqv' OPT
+do
+    case $OPT in
+        h)  usage
+            ;;
+        q)  SHOW_MSG=false
+            ZIP_Q="-q"
+            TAR_V=""
+            ;;
+        v)  ZIP_Q=""
+            TAR_V="-v"
+            ;;
+        *)  usage "ERROR: unknown option '$OPTARG'"
+            ;;
+    esac
+done
+
+shift $(( OPTIND - 1 ))
+
+########################################
+# Get the input filename
+
+INFILE="${1:-}"
+if [[ -z "$INFILE" ]]
+then
+    usage
+fi
+
+########################################
+# Figure out the output filename
+
+OUTFILE="${2:-}"
+if [[ -z "$OUTFILE" ]]
+then
+    OUTFILE="${INFILE%.rmn}"
+    if [[ "$OUTFILE" == "$INFILE" ]]
+    then
+        usage "ERROR: unable to build output filename, please specify OUTFILE"
+    fi
+
+    OUTFILE="$OUTFILE.rmdoc"
+fi
+
+########################################
+# Create a work directory, and make sure it gets deleted when the script ends
+
+WORKDIR="$( mktemp -d )"
+trap "rm -rf '$WORKDIR'" EXIT
+
+########################################
+# If any of the commands below fail, stop the entire script.
+
+set -e
+
+########################################
+# Unzip the input file to a work directory
+
+if $SHOW_MSG
+then
+    echo "Reading '$INFILE'"
+fi
+
+tar xf "$INFILE" -C "$WORKDIR" $TAR_V
+
+########################################
+# Create the output file from the work directory
+
+if $SHOW_MSG
+then
+    echo "Writing '$OUTFILE'"
+fi
+
+( cd "$WORKDIR" ; zip -r $ZIP_Q "$OUTFILE" * )
+mv "$WORKDIR/$OUTFILE" .
