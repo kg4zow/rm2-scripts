@@ -1,0 +1,1615 @@
+#!/usr/bin/env perl
+#
+# rmbackup
+# John Simpson <jms1@jms1.net> 2024-04-21
+#
+# Last updated 2024-06-01
+#
+###############################################################################
+#
+# The MIT License (MIT)
+#
+# Copyright (C) 2024 John Simpson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
+
+require 5.005 ;
+use strict ;
+
+use Cwd qw( abs_path ) ;
+use File::Temp qw( tempfile ) ;
+use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
+use JSON ;
+use LWP::UserAgent ;
+
+my $VERSION = '0.0.1' ;
+
+########################################
+# List of directories to be sync'ed from the tablet
+# - each directory MUST start and end with "/"
+
+my @backup_dirs = (
+    "/usr/share/remarkable/" ,
+    "/home/root/.config/" ,
+    "/home/root/.ssh/" ,
+    "/home/root/.local/share/" ,
+) ;
+
+########################################
+# Default values for some options
+
+my $usb_tablet      = '10.11.99.1' ;
+
+########################################
+# Options to be used with SSH commands
+
+my $ssh_options = '-o HostKeyAlgorithms=+ssh-rsa'
+    . ' -o PubKeyAcceptedKeyTypes=+ssh-rsa'
+    . ' -o ForwardAgent=no'
+    . ' -o ForwardX11=no'
+    . ' -o CheckHostIP=no'
+    . ' -o UpdateHostKeys=no'
+    . ' -o StrictHostKeyChecking=no'
+    . ' -o VerifyHostKeyDNS=no'
+    . ' -o UserKnownHostsFile=/dev/null'
+    . ' -o GlobalKnownHostsFile=/dev/null'
+    . ' -o LogLevel=error' ;
+
+########################################
+# Initial contents of '.gitignore' file
+
+my $gitignore = <<EOF ;
+.DS_Store
+._*
+EOF
+
+########################################
+# Will be set from command line
+
+my $do_create       = 0 ;       # -c, --create
+my $verbose         = 0 ;       # -v, --verbose
+my $commit_msg      = '' ;      # -m=, --msg=
+my $keep_work       = 0 ;       # -k, --keep
+my $show_cmd        = 0 ;       # -x
+my $do_debug        = 0 ;       # -D, --debug
+
+my $out_dir         = '' ;
+
+########################################
+# Will be set from config file within the repo
+
+my $cfg_serial      = '' ;      # serial
+my $tablet          = '' ;      # tablet
+my $out_rmdoc       = 0 ;       # rmdoc
+my $out_rmn         = 0 ;       # rmn
+my $out_pdf         = 0 ;       # pdf
+my $pdf_wifi        = 0 ;       # pdf_wifi
+my $git_commit      = 0 ;       # git_commit
+my $git_push        = 0 ;       # git_push
+
+########################################
+# Other globals
+
+my $serial          = '' ;      # serial number of connected tablet
+my $up_files        = 0 ;       # how many files were updated when sync'ing
+my $up_docs         = 0 ;       # how many documents (UUIDs) were updated
+my $up_other        = 0 ;       # how many non-document files were updated
+my %updoc           = () ;      # UUID => 1 if doc was updated
+my %fp_uuid         = () ;      # fullpath => UUID
+
+my $ua              = new LWP::UserAgent( "rmbackup/$VERSION " ) ;
+
+###############################################################################
+#
+# Coloured line functions
+
+sub redline(@)
+{
+    my $msg = join( '' , @_ ) ;
+    $msg =~ s|\s+$||s ;
+    printf "\e[0;1;37;41m%s\e[0K\e[0m\n" , $msg ;
+}
+
+sub yellowline(@)
+{
+    my $msg = join( '' , @_ ) ;
+    $msg =~ s|\s+$||s ;
+    printf "\e[0;30;43m%s\e[K\e[0m\n"  , $msg ;
+}
+
+sub blueline(@)
+{
+    my $msg = join( '' , @_ ) ;
+    $msg =~ s|\s+$||s ;
+    printf "\e[0;1;37;44m%s\e[0K\e[0m\n"  , $msg ;
+}
+
+sub greenline(@)
+{
+    my $msg = join( '' , @_ ) ;
+    $msg =~ s|\s+$||s ;
+    printf "\e[0;1;37;42m%s\e[0K\e[0m\n"  , $msg ;
+}
+
+sub fail(@)
+{
+    redline( @_ ) ;
+    exit 1 ;
+}
+
+sub debug(@)
+{
+    $do_debug && yellowline( @_ ) ;
+}
+
+###############################################################################
+#
+# Run an external command. Return 1 if the command succeeded, or 0 otherwise.
+
+sub runit($)
+{
+    my $cmd = shift ;
+
+    if ( $show_cmd )
+    {
+        greenline "+ $cmd" ;
+    }
+
+    my $rv = system( $cmd ) ;
+
+    debug( sprintf( "rv=%d (%04x)" , $rv , $rv ) ) ;
+
+    return( 0 == $rv ) ;
+}
+
+###############################################################################
+#
+# Create a directory, plus any parent directories
+
+sub mkdir_p($;$)
+{
+    my $dir  =   shift ;
+    my $mode = ( shift || 0777 ) ;
+
+    debug "mkdir_p('$dir') start" ;
+
+    ########################################
+    # Build a list of directories which don't exist
+
+    my @mk = () ;
+
+    while ( ! -d $dir )
+    {
+        push( @mk , $dir ) ;
+        $dir =~ s|^(.*)/.*$|$1| ;
+    }
+
+    ########################################
+    # Create the necessary directories
+
+    for my $d ( reverse @mk )
+    {
+        debug "mkdir_p('$dir') mkdir('$d')" ;
+        mkdir( $d , $mode )
+            or fail "ERROR: mkdir('$d'): $!" ;
+    }
+
+    debug "mkdir_p('$dir') finish" ;
+}
+
+###############################################################################
+#
+# Remove an entire directory
+
+sub rm_r($) ;
+sub rm_r($)
+{
+    my $dir = shift ;
+
+    if ( -d $dir )
+    {
+        opendir( my $dh , $dir )
+            or fail "rm_r(): opendir('$dir'): $!" ;
+
+        while ( my $f = readdir $dh )
+        {
+            next if ( $f =~ m|^\.\.?$| ) ;
+            if ( -d "$dir/$f" )
+            {
+                rm_r( "$dir/$f" ) ;
+            }
+            else
+            {
+                debug "rm_r(): unlink('$dir/$f')" ;
+                unlink( "$dir/$f" )
+                    or fail "rm_r(): unlink('$dir/$f'): $!" ;
+            }
+        }
+
+        closedir $dh ;
+
+        debug "rm_r(): rmdir('$dir')" ;
+        rmdir $dir
+            or fail "rm_r(): rmdir('$dir'): $!" ;
+    }
+    elsif ( -e $dir )
+    {
+        debug "rm_r(): unlink('$dir')" ;
+        unlink( $dir )
+            or fail "rm_r(): unlink('$dir'): $!" ;
+    }
+}
+
+###############################################################################
+#
+# Link a directory full of files into a different directory
+# (like copying, but without copying anything)
+
+sub ln_r($$)
+{
+    my $oldfiles = shift ;
+    my $newdir   = shift ;
+
+    debug "ln_r('$oldfiles','$newdir') starting" ;
+
+    ########################################
+    # If $oldfiles is just a single file, link it and be done with it
+
+    if ( -f $oldfiles )
+    {
+        debug "ln_r(): shortcut link('$oldfiles','$newdir')" ;
+
+        link( $oldfiles , $newdir )
+            or fail "ERROR: link('$oldfiles','$newdir'): $!\n" ;
+        return ;
+    }
+
+    ########################################
+    # Extract the directory part of $oldfiles
+
+    $oldfiles =~ m|^(.*)/| ;
+    my $olddir = ( $1 || '' ) ;
+    if ( $olddir eq '' )
+    {
+        fail "ln_r(): '$oldfiles' has no directory" ;
+    }
+
+    ########################################
+    # Process all files/dirs that $oldfiles points to
+
+    my @dirs = () ;
+
+    debug "ln_r(): glob('$oldfiles')" ;
+
+    for my $ofile ( glob( $oldfiles ) )
+    {
+
+        if ( -d $ofile )
+        {
+            debug "ln_r(): push(\@dirs,'$ofile')" ;
+            push( @dirs , $ofile ) ;
+        }
+        elsif ( -f $ofile )
+        {
+            $ofile =~ m|^(.*)/(.+)$| ;
+            my ( $od , $of ) = ( $1 , $2 ) ;
+
+            my $nd = $od ;
+            $nd =~ s|^$olddir|$newdir| ;
+
+            debug "ln_r(): link('$ofile','$nd/$of')" ;
+
+            link( $ofile , "$nd/$of" )
+                or fail "ln_r(): link('$ofile','$nd/$of'): $!\n" ;
+        }
+    }
+
+    debug "ln_r(): glob finish" ;
+
+    ########################################
+    # Process any directories that were found
+
+    while ( my $odir = shift( @dirs ) )
+    {
+        my $ndir = $odir ;
+        $ndir =~ s|^$olddir|$newdir| ;
+
+        debug "ln_r(): odir='$odir' ndir='$ndir'" ;
+
+        ########################################
+        # Make sure the target directory exists
+
+        unless ( -d $ndir )
+        {
+            debug "ln_r(): mkdir('$ndir')" ;
+
+            mkdir( $ndir )
+                or fail "ln_r(): mkdir('$ndir'): $!\n" ;
+        }
+
+        ########################################
+        # Process the contents of the directory
+        # - directories: add to the list
+        # - files: link
+        # - others: ignore
+
+        debug "ln_r(): opendir('$odir')" ;
+
+        opendir( D , $odir )
+            or fail "ln_r(): opendir('$odir'): $!\n" ;
+
+        while ( my $f = readdir( D ) )
+        {
+            next if ( $f =~ m|^\.\.?$| ) ;
+
+            if ( -d "$odir/$f" )
+            {
+                debug "ln_r(): push(\@dirs,'$odir/$f')" ;
+
+                push( @dirs , "$odir/$f" ) ;
+                next ;
+            }
+            elsif ( -f "$odir/$f" )
+            {
+                debug "ln_r(): link('$odir/$f','$ndir/$f')" ;
+
+                link( "$odir/$f" , "$ndir/$f" )
+                    or fail "ERROR: link('$odir/$f','$ndir/f'): $!\n" ;
+            }
+        }
+
+        debug "ln_r(): closedir()" ;
+
+        closedir( D ) ;
+    }
+
+}
+
+###############################################################################
+#
+# Read a file into memory
+
+sub readfile($;$)
+{
+    my $filename  = shift ;
+    my $blocksize = ( shift || 1048576 ) ;
+
+    my $rv        = '' ;
+
+    open( my $fh , '<' , $filename )
+        or fail "ERROR: open('$filename'): $!\n" ;
+    binmode $fh ;
+
+    my $pos = 0 ;
+    while ( 1 )
+    {
+        my $b = read( $fh , $rv , $blocksize , $pos ) ;
+        defined( $b ) or fail "ERROR: read('$filename'): $!\n" ;
+        last if ( $b < 1 ) ;
+        $pos += $b ;
+    }
+    close $fh ;
+
+    return $rv ;
+}
+
+###############################################################################
+#
+# Read config file
+
+sub read_config()
+{
+    $cfg_serial = '' ;
+    $tablet     = '' ;
+    $out_rmdoc  = 0 ;
+    $out_rmn    = 0 ;
+    $out_pdf    = 0 ;
+
+    ########################################
+    # Read serial.txt (if it exists)
+    # - expected serial number
+
+    if ( open( SER , '<' , "$out_dir/serial.txt" ) )
+    {
+        debug "read_config(): reading \"$out_dir/serial.txt\"" ;
+
+        while ( my $line = <SER> )
+        {
+            chomp $line ;
+
+            $line =~ s|#.+$|| ;
+            $line =~ s|\s+$|| ;
+            next unless ( $line ne '' ) ;
+
+            $cfg_serial = $line ;
+            debug "\$cfg_serial='$cfg_serial'" ;
+            last ;
+        }
+
+        close SER ;
+    }
+
+    ########################################
+    # Read rmbackup.cfg (must exist)
+    # - user settings
+
+    my $file = "$out_dir/rmbackup.cfg" ;
+
+    debug "read_config(): reading '$file'" ;
+
+    open( CFG , '<' , $file )
+        or fail( "ERROR: can't read config file \"$file\": $!" ) ;
+
+    while ( my $line = <CFG> )
+    {
+        chomp $line ;
+
+        $line =~ s|#.+$|| ;
+        $line =~ s|\s+$|| ;
+        next unless ( $line ne '' ) ;
+
+        debug $line ;
+
+        if ( $line =~ m|^\s*tablet\s*=\s*(\S+)|i )
+        {
+            $tablet = $1 ;
+            debug "\$tablet='$tablet'" ;
+        }
+        elsif ( $line =~ m|^\s*rmdoc\s*=\s*(\S+)|i )
+        {
+            my $x = $1 ;
+            if ( ( $x eq '1' ) || ( $x eq 'true' ) || ( $x eq 'yes' ) )
+            {
+                $out_rmdoc = 1 ;
+                debug "\$out_rmdoc=$out_rmdoc" ;
+            }
+            elsif ( ( $x eq '0' ) || ( $x eq 'false' ) || ( $x eq 'no' ) )
+            {
+                $out_rmdoc = 0 ;
+                debug "\$out_rmdoc=$out_rmdoc" ;
+            }
+            else
+            {
+                debug "unrecognized" ;
+            }
+        }
+        elsif ( $line =~ m|^\s*rmn\s*=\s*(\S+)|i )
+        {
+            my $x = $1 ;
+            if ( ( $x eq '1' ) || ( $x eq 'true' ) || ( $x eq 'yes' ) )
+            {
+                $out_rmn = 1 ;
+                debug "\$out_rmn=$out_rmn" ;
+            }
+            elsif ( ( $x eq '0' ) || ( $x eq 'false' ) || ( $x eq 'no' ) )
+            {
+                $out_rmn = 0 ;
+                debug "\$out_rmn=$out_rmn" ;
+            }
+            else
+            {
+                debug "unrecognized" ;
+            }
+        }
+        elsif ( $line =~ m|^\s*pdf\s*=\s*(\S+)|i )
+        {
+            my $x = $1 ;
+            if ( ( $x eq '1' ) || ( $x eq 'true' ) || ( $x eq 'yes' ) )
+            {
+                $out_pdf = 1 ;
+                debug "\$out_pdf=$out_pdf" ;
+            }
+            elsif ( ( $x eq '0' ) || ( $x eq 'false' ) || ( $x eq 'no' ) )
+            {
+                $out_pdf = 0 ;
+                debug "\$out_pdf=$out_pdf" ;
+            }
+            else
+            {
+                debug "unrecognized" ;
+            }
+        }
+        elsif ( $line =~ m|^\s*pdf_wifi\s*=\s*(\S+)|i )
+        {
+            my $x = $1 ;
+            if ( ( $x eq '1' ) || ( $x eq 'true' ) || ( $x eq 'yes' ) )
+            {
+                $pdf_wifi = 1 ;
+                debug "\$pdf_wifi=$pdf_wifi" ;
+            }
+            elsif ( ( $x eq '0' ) || ( $x eq 'false' ) || ( $x eq 'no' ) )
+            {
+                $pdf_wifi = 0 ;
+                debug "\$pdf_wifi=$pdf_wifi" ;
+            }
+            else
+            {
+                debug "unrecognized" ;
+            }
+        }
+        elsif ( $line =~ m|^\s*git_commit\s*=\s*(\S+)|i )
+        {
+            my $x = $1 ;
+            if ( ( $x eq '1' ) || ( $x eq 'true' ) || ( $x eq 'yes' ) )
+            {
+                $git_commit = 1 ;
+                debug "\$git_commit=$git_commit" ;
+            }
+            elsif ( ( $x eq '0' ) || ( $x eq 'false' ) || ( $x eq 'no' ) )
+            {
+                $git_commit = 0 ;
+                debug "\$git_commit=$git_commit" ;
+            }
+            else
+            {
+                debug "unrecognized" ;
+            }
+        }
+        elsif ( $line =~ m|^\s*git_push\s*=\s*(\S+)|i )
+        {
+            my $x = $1 ;
+            if ( ( $x eq '1' ) || ( $x eq 'true' ) || ( $x eq 'yes' ) )
+            {
+                $git_push = 1 ;
+                debug "\$git_push=$git_push" ;
+            }
+            elsif ( ( $x eq '0' ) || ( $x eq 'false' ) || ( $x eq 'no' ) )
+            {
+                $git_push = 0 ;
+                debug "\$git_push=$git_push" ;
+            }
+            else
+            {
+                debug "unrecognized" ;
+            }
+        }
+
+    }
+
+    close CFG ;
+
+    debug "read_config(): finished" ;
+}
+
+###############################################################################
+#
+# Gather files for a UUID into a work directory
+
+sub gather_files($$)
+{
+    my $uuid = shift ;
+    my $wdir = shift ;
+
+    debug "gather_files() starting uuid='$uuid' wdir='$wdir'" ;
+
+    ########################################
+    # Make sure $wdir starts empty
+
+    rm_r( $wdir ) ;
+    mkdir_p( $wdir ) ;
+
+    ########################################
+    # Link the files into the work directory
+
+    my $src_dir = "$out_dir/raw/home/root/.local/share/remarkable/xochitl" ;
+
+    ln_r( "$src_dir/$uuid*" , $wdir ) ;
+
+    debug "gather_files() finished" ;
+}
+
+###############################################################################
+#
+# Write an '.rmdoc' file
+
+sub write_rmdoc($$)
+{
+    my $wdir = shift ;
+    my $file = shift ;
+
+    debug "write_rmdoc() wdir='$wdir' file='$file'" ;
+
+    ########################################
+    # If the '.rmdoc' file already exists, delete it first.
+    # Otherwise, 'zip' will try to update it in place, which can produce an
+    # archive with leftover files which previously existed, but have sicne
+    # been deleted (i.e. pages deleted or moved to other docs, etc.)
+
+    if ( -f $file )
+    {
+        debug "write_rmdoc(): unlink('$file')" ;
+        unlink( $file )
+            or fail "write_rmdoc(): unlink('$file'): $!\n" ;
+    }
+
+    ########################################
+    # Create the file
+
+    my $vq = ( $verbose ? '' : 'q' ) ;
+
+    runit "cd '$wdir' && zip -${vq}r9 \"$file\" *" ;
+
+    debug "write_rmdoc() finished" ;
+}
+
+###############################################################################
+#
+# Write an '.rmn' file
+
+sub write_rmn($$)
+{
+    my $wdir = shift ;
+    my $file = shift ;
+
+    debug "write_rmn() wdir='$wdir' file='$file'" ;
+
+    ########################################
+    # If the '.rmn' file already exists, delete it first.
+
+    if ( -f $file )
+    {
+        debug "write_rmn(): unlink('$file')" ;
+        unlink( $file )
+            or fail "write_rmn(): unlink('$file'): $!\n" ;
+    }
+
+    ########################################
+    # Create the .rmn file
+
+    my $vq = ( $verbose ? 'v' : '' ) ;
+
+    runit "tar c${vq}f '$file' -C '$wdir' --strip-components 1 ." ;
+
+    debug "write_rmn() finished" ;
+}
+
+###############################################################################
+#
+# Verify that the talet's web interface is enabled
+
+sub verify_web()
+{
+    ########################################
+    # Build the request
+
+    my $url = "http://$tablet/" ;
+    my $req = new HTTP::Request( GET => $url ) ;
+    $req->content_type( 'text/plain' ) ;
+
+    ########################################
+    # Execute the request
+
+    debug "verify_web(): requesting $url" ;
+    my $res = $ua->request( $req ) ;
+
+    ########################################
+    # If the request succeeded, return
+
+    if ( $res->is_success() )
+    {
+        debug "verify_web(): success" ;
+        return ;
+    }
+
+    ########################################
+    # The request failed
+
+    redline "ERROR: unable to connect to $url" ;
+    print $res->status_line() ;
+
+    print <<EOF ;
+
+
+Make sure the tablet's web interface is enabled. On the tablet ...
+
+- Menu
+- Settings
+- Storage
+
+EOF
+    exit 1 ;
+}
+
+###############################################################################
+#
+# Download a PDF file
+
+sub download_pdf($$)
+{
+    my $uuid = shift ;
+    my $file = shift ;
+
+    ########################################
+    # Build the request
+
+    my $url = "http://$tablet/download/$uuid/placeholder" ;
+    my $req = new HTTP::Request( GET => $url ) ;
+
+    ########################################
+    # Execute the request
+
+    debug "download_pdf(): requesting $url" ;
+    my $res = $ua->request( $req ) ;
+
+    ########################################
+    # If the request failed, report an error and return
+    # without writing any output
+
+    unless ( $res->is_success() )
+    {
+        redline "ERROR: unable to download $url" ;
+        print $res->status_line() , "\n" ;
+        return ;
+    }
+
+    ########################################
+    # Save the response body
+
+    debug "download_pdf(): writing $file" ;
+
+    open( PDF , '>' , $file )
+        or fail "ERROR: unable to write $file: $!" ;
+    binmode PDF ;
+    print PDF $res->content() ;
+    close PDF ;
+}
+
+###############################################################################
+#
+# Build a "shell-safe" filename for a visibleName value. If the value
+# contains any characters that might cause problems for shells (quotes,
+# apostrophes, asterisk, question mark, colon, semicolon, slash, backslash,
+# brackets, braces, less/greater, pipe, dollar) replace them with underscores.
+
+sub cleanup_filename($)
+{
+    my $filename = shift ;
+
+    $filename =~ s,["'\*\?:;/\\\[\]{}<>\|\$],_,g ;
+
+    return $filename ;
+}
+
+###############################################################################
+#
+# Use rsync to copy a directory from the tablet to the local machine,
+# possibly excluding one or more files.
+#
+# Notes:
+# - rsync uses ssh to connect to the tablet. Setting the RSYNC_SSH environment
+#   variable makes it use that specific command instead of just 'ssh'. The
+#   options are there because the tablet's sshd uses key types which are now
+#   considered deprecated, but not yet old enough to be considered unsafe.
+
+sub rsync($;@)
+{
+    my $arg = shift ;
+
+    blueline "Sync'ing raw files from $arg" ;
+
+    ########################################
+    # Tell rsync how to run ssh
+
+    $ENV{'RSYNC_RSH'} = "ssh $ssh_options" ;
+
+    ########################################
+    # Build the command line
+
+    $arg =~ s|/$|| ;
+    my $src = "root\@$tablet:$arg" ;
+    my $dst = "$out_dir/raw$arg" ;
+
+    my $cmd = 'rsync -crvl --delete' ;
+    while ( my $x = shift )
+    {
+        $cmd .= " --exclude '$x'" ;
+    }
+
+    $cmd .= " '$src/' '$dst/'" ;
+
+    ########################################
+    # Make sure the destination directory exists
+
+    unless ( -d $dst )
+    {
+        mkdir_p( $dst ) ;
+    }
+
+    ########################################
+    # Run the command
+    # - If the output contains any filenames which are reMarkable documents,
+    #   extract the UUID and remember the UUID as "changed"
+
+    $show_cmd && greenline "+ $cmd" ;
+
+    open( R , "$cmd 2>&1 |" )
+        or fail "ERROR: \"$cmd\": $!" ;
+
+    while ( my $line = <R> )
+    {
+        $verbose && print $line ;
+
+        next if ( $line =~ m|^Warning:| ) ;
+        next if ( $line =~ m|^receiving | ) ;
+        next if ( $line =~ m|^created | ) ;
+        next if ( $line =~ m|^\s*$| ) ;
+        next if ( $line =~ m|^sent | ) ;
+        next if ( $line =~ m|^total | ) ;
+
+        $verbose || print $line ;
+        $up_files ++ ;
+
+        if ( $line =~ m|(remarkable/xochitl/([0-9a-f\-]{36})[\./].*)|i )
+        {
+            my ( $upfile , $uuid ) = ( $1 , $2 ) ;
+            $updoc{$uuid} = 1 ;
+            debug "changed: $uuid" ;
+        }
+        else
+        {
+            $up_other ++ ;
+        }
+    }
+
+    close R ;
+}
+
+###############################################################################
+#
+# Usage
+
+sub usage(;$)
+{
+    my $msg = ( shift || '' ) ;
+
+    print <<EOF ;
+$0 [options] DIR
+
+Back up the raw files from a reMarkable tablet.
+
+Backups for each tablet are stored in a "backup directory". The directory
+will contain an 'rmbackup.cfg' file, which tells the program what to do. It
+will also contain a 'serial.txt' file, with the serial number of the tablet.
+The program uses this to make sure it isn't mixing data from different
+tablets.
+
+In the backup directory, a 'raw/' directory will contain copies of the raw
+files on the tablet's filesystem. The `rsync` command updates this directory
+every time a backup is done, and uses the list of which files were updated
+to figure out which notebooks changed since the previous backup.
+
+The program can optionally produce "archive" files from the raw files. These
+archives allow you to easily restore files to the tablet (or to a different
+tablet). "rmdoc" files can be uploaded using the built-in web browser (in
+tablet software 3.10 and later), and "rmn" files can be uploaded using RCU.
+
+If the tablet's built-in web interface is enabled, the program can also
+download PDFs of the documents. These files *can* be uploaded back to the
+tablet, but if you do this, any pen strokes in the file will be part of the
+PDF "background images", and will not be edit-able.
+
+The program can also run 'git commit' and 'git push' commands after sync'ing
+the files and creating archives.
+
+-c, --create    Create the output directory with an 'rmbackup.cfg' file,
+                then immediately exit without doing a backup. The idea is,
+                you should edit this file and then run the script without
+                this option to actually do the backups.
+
+
+-v, --verbose   Use the appropriate options to make 'rsync', 'tar', 'zip',
+                and 'git' commands show what they're doing. Without this,
+                options will be used to make these commands "quiet".
+
+-m, --msg ___   Specify the first line of the commit message. If this is
+                specified, the program-generated commit message will be
+                added after it.
+
+-k, --keep      Don't delete the work directories used for building archives.
+
+-x              Show external commands being run.
+
+-D, --debug     Show debugging messages.
+
+-h, --help      Show this help message.
+
+
+EOF
+
+    if ( $msg ne '' )
+    {
+        fail $msg ;
+    }
+
+    exit 0 ;
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+#
+# Parse command line
+
+GetOptions(
+    'c|create'          => \$do_create ,
+    'D|debug'           => \$do_debug ,
+    'h|?|help|usage'    => sub{ usage() ; } ,
+    'k|keep'            => \$keep_work ,
+    'm|msg=s'           => \$commit_msg ,
+    'v|verbose'         => \$verbose ,
+    'x'                 => \$show_cmd ,
+) || usage() ;
+
+########################################
+# If a commit message was specified, add a blank line after it, so the
+# actual commit message will start with this message.
+
+$commit_msg =~ s|\s+$||s ;
+if ( $commit_msg ne '' )
+{
+    $commit_msg .= "\n\n" ;
+}
+
+########################################
+# Output directory is specified as a command line argument
+# or via environment variable.
+
+$out_dir = ( shift @ARGV || $ENV{'RMBACKUP_DIR'} || '' ) ;
+if ( $out_dir eq '' )
+{
+    usage( "ERROR: no output directory specified, cannot continue\n" ) ;
+}
+
+########################################
+# Convert output directory to absolute path
+# - there is no way to build the 'zip' command line with relative paths
+
+my $zout_dir = abs_path( $out_dir ) ;
+unless ( defined( $zout_dir ) )
+{
+    usage( "ERROR: unable to resolve output directory '$out_dir'\n" ) ;
+}
+
+$out_dir = $zout_dir ;
+print "Output directory: $out_dir\n" ;
+
+###############################################################################
+#
+# If we're creating a new output directory, do that.
+
+if ( $do_create )
+{
+    ########################################
+    # Make sure the directory doesn't already exist
+
+    if ( -d $out_dir )
+    {
+        fail( "ERROR: can't create \"$out_dir\", already exists" ) ;
+    }
+
+    ########################################
+    # Create the directory
+    # - mkdir_p() will fail() if necessary
+
+    mkdir_p( $out_dir ) ;
+
+    ########################################
+    # Write the default config file
+
+    blueline "Creating \"$out_dir/rmbackup.cfg\"" ;
+
+    open( O , '>' , "$out_dir/rmbackup.cfg" )
+        or fail( "ERROR: can't create \"$out_dir/rmbackup.cfg\": $!" ) ;
+
+    print O <<EOF ;
+# User settings for rmbackup
+# https://github.com/kg4zow/rm2-scripts/rmbackup/
+
+########################################
+# The hostname or IP address of the tablet.
+# - The default address, "10.11.99.1", is used to connect to the tablet
+#   over a USB cable.
+# - The program CAN connect to tablets using wifi, however it cannot
+#   download PDF files over wifi, unless the tablet has been "hacked" to
+#   make the web interface accessible over wifi.
+
+tablet      = 10.11.99.1
+
+########################################
+# Whether or not to create '.rmdoc' files.
+#
+# These are "archive" files used with reMarkable software 3.10 and later.
+# (Note that 3.9 claims to support them, but if you try to download one
+# through the web site, what you actually get is a PDF file.) These can be
+# uploaded to a tablet and the notebook will be as edit-able as the
+# notebook that was downloaded.
+#
+# - Use 'true', 'yes', or '1' to enable
+# - Use 'false', 'no', or '0' to disable
+
+rmdoc       = false
+
+########################################
+# Whether or not to create '.rmn' files.
+#
+# These are "archive" files used with RCU http://www.davisr.me/projects/rcu/
+# These can be uploaded to a tablet and the notebook will be as edit-able as
+# the notebook that was downloaded.
+#
+# - Use 'true', 'yes', or '1' to enable
+# - Use 'false', 'no', or '0' to disable
+
+rmn         = false
+
+########################################
+# Whether or not to download '.pdf' files.
+#
+# Downloading PDF files requires that the tablet's built-in web interface
+# is enabled, and that the program is connecting to the tablet via the
+# web interface (or that the tablet has been "hacked" so the web interface
+# is accessible over wifi).
+#
+# - Use 'true', 'yes', or '1' to enable
+# - Use 'false', 'no', or '0' to disable
+
+pdf         = false
+
+########################################
+# Whether or not the tablet has been "hacked" to allow the web interface
+# to be accessible via wifi. This is needed in order to download PDF files
+# from an IP other than 10.11.99.1.
+#
+# - Use 'true', 'yes', or '1' to enable
+# - Use 'false', 'no', or '0' to disable
+
+pdf_wifi    = false
+
+########################################
+# Whether or not to do 'git commit' after sync'ing files.
+#
+# Do not enable this unless the backup directory has already been set up
+# as a git directory.
+#
+# - Use 'true', 'yes', or '1' to enable
+# - Use 'false', 'no', or '0' to disable
+
+git_commit  = false
+
+########################################
+# Whether or not to do 'git push' after doing a 'git commit'.
+#
+# Do not enable this unless 'git_commit' is also enabled.
+#
+# - Use 'true', 'yes', or '1' to enable
+# - Use 'false', 'no', or '0' to disable
+
+git_push    = false
+EOF
+
+    close O ;
+
+    ########################################
+    # Write the initial '.gitignore' file
+
+    blueline "Creating \"$out_dir/.gitignore\"" ;
+
+    open( O , '>' , "$out_dir/.gitignore" )
+        or fail( "ERROR: can't create \"$out_dir/.gitignore\": $!" ) ;
+
+    print O $gitignore ;
+    close O ;
+
+    ########################################
+    # Tell the user what to do next
+
+    print <<EOF ;
+
+Please edit "$out_dir/rmbackup.cfg"
+as needed to set the options that the script will use when processing
+this directory. Directions are in the file.
+
+In addition, if you plan to use git to track changes over time, you should
+run the appropriate 'git' commands in the directory to set up a repo and
+create the first commit.
+
+    cd "$out_dir"
+    git init -b main
+    git add .
+    git commit -m 'initial commit'
+
+If you create a git repo and plan to sync it with a remote git repo
+(i.e. Github, Keybase, etc.) you *can* also link the local directory
+to that repo now, or whenever you have the URL of the remote repo.
+
+    cd "$out_dir"
+    git remote add origin URL
+
+Once the file has been edited and any git commands have been done, run
+this script again with the same directory, but without the '--create'
+option. For example ...
+
+$0 "$out_dir"
+
+EOF
+
+    ########################################
+    # Finished
+
+    exit 0 ;
+}
+
+###############################################################################
+#
+# Read the config file
+
+blueline "Reading configuration from \"$out_dir/\"" ;
+
+read_config() ;
+
+########################################
+# If we're being asked to save PDFs
+# - MAYBE make sure the tablet is connected via USB (by checking the IP
+#   we're being told to connect to)
+# - Make sure the tablet's web interface  is enabled
+
+if ( $out_pdf )
+{
+    unless ( $pdf_wifi )
+    {
+        if ( $tablet ne $usb_tablet )
+        {
+            redline( "ERROR: PDFs can only be downloaded via USB, cannot continue\n" ) ;
+            print "tablet='$tablet'\n" ;
+            exit 1 ;
+        }
+    }
+
+    blueline "Verifying web interface is enabled" ;
+    verify_web() ;
+}
+
+########################################
+# Make sure the git-related options make sense.
+
+if ( $git_commit )
+{
+    blueline "Verifying that the backup directory contains a git repo" ;
+
+    if ( ! -d "$out_dir/.git" )
+    {
+        fail "ERROR: git_commit is true but '$out_dir' is not a git repository" ;
+    }
+}
+elsif ( $git_push )
+{
+    fail "ERROR: git_push is true but git_commit is false" ;
+}
+
+########################################
+# Get the tablet's serial number
+# - stored in bytes 0004-0012 of
+#   - rM1: /dev/mmcblk1boot1
+#   - rM2: /dev/mmcblk2boot1
+
+blueline "Getting tablet's serial number" ;
+
+my $rcmd = 'if [[ -e /dev/mmcblk1boot1 ]] ; then DEV=1 ; '
+         . 'elif [[ -e /dev/mmcblk2boot1 ]] ; then DEV=2 ; '
+         . 'else exit 1 ; fi ; '
+         . 'dd bs=1 skip=4 count=15 if=/dev/mmcblk${DEV}boot1 2>/dev/null' ;
+
+my $cmd = "ssh $ssh_options root\@$tablet '$rcmd'" ;
+
+$show_cmd && greenline "+ $cmd" ;
+open( I , "$cmd |" )
+    or fail "ERROR: $!\n" ;
+$serial = <I> ;
+chomp $serial ;
+close I ;
+
+########################################
+# If the config file contained a serial number,
+# make sure it matches the tablet we're talking to.
+
+if ( $cfg_serial ne '' )
+{
+    if ( $serial eq $cfg_serial )
+    {
+        print "Tablet serial: $serial (OK)\n" ;
+    }
+    else
+    {
+        redline "ERROR: wrong serial number" ;
+        print <<EOF ;
+
+This output directory contains data from a different tablet.
+
+Output directory: $cfg_serial
+Connected tablet: $serial
+
+EOF
+        exit 1 ;
+    }
+}
+else
+{
+    print "Tablet serial: $serial (NEW)\n" ;
+}
+
+########################################
+# If the serial.txt file didn't exist, write it
+
+if ( $cfg_serial eq '' )
+{
+    blueline "Writing \"$serial\" to \"$out_dir/serial.txt\"" ;
+
+    open( CFG , '>' , "$out_dir/serial.txt" )
+        or fail( "ERROR: can't write \"$out_dir/serial.txt\": $!\n" ) ;
+    print CFG "$serial\n" ;
+    close CFG ;
+}
+
+###############################################################################
+#
+# Sync the tablet's raw files
+
+rsync( '/usr/share/remarkable/' ) ;
+rsync( '/home/' ,
+        'root/.cache/remarkable/xochitl/telemetry' ,
+        'root/.cache/remarkable/remarkable-qa/qmlcache' ,
+        'root/.cache/remarkable/xochitl/qmlcache' ) ;
+
+# assigning keys() to a scalar like this returns the count
+$up_docs = keys %updoc ;
+
+print "Found $up_files file(s) updated in $up_docs document(s), plus $up_other other file(s)\n" ;
+
+$commit_msg .= <<EOF ;
+rmbackup: $up_files file(s) updated in $up_docs document(s), plus $up_other other file(s)
+
+EOF
+
+########################################
+# If nothing was sync'ed, we're done
+
+unless ( $up_files > 0 )
+{
+    exit 0 ;
+}
+
+###############################################################################
+#
+# If we're producing any archive files ...
+
+if ( $out_rmdoc || $out_rmn || $out_pdf )
+{
+    my %metadata    = () ;      # UUID => { key => value }
+    my %pname       = () ;      # "parent/_safe_visibleName" => UUID
+    my %pndup       = () ;      # "parent/_safe_visibleName" => 1 (if >1 UUID)
+    my $doc_count   = 0 ;       # how many documents exist
+
+    ############################################################
+    # Analyze the *.metadata files, build full path name for each UUID.
+
+    blueline "Analyzing document metadata" ;
+
+    ########################################
+    # Store the type, parent visibleName, and _safe_visibleName of each UUID
+
+    for my $f ( glob( "$out_dir/raw/home/root/.local/share/remarkable/xochitl/*.metadata" ) )
+    {
+        $doc_count ++ ;
+
+        ########################################
+        # Extract UUID from filename
+
+        $f =~ m|/([0-9a-fA-F\-]+)\.metadata$| ;
+        my $uuid = $1 ;
+
+        ########################################
+        # Read/parse file into %metadata
+
+        my $j = decode_json( readfile( $f ) ) ;
+
+        for my $k ( keys %{$j} )
+        {
+            $metadata{$uuid}->{$k} = $j->{$k} ;
+        }
+
+        ########################################
+        # Remember the (parent,name) or "pname" as pointing to this UUID.
+        #
+        # Build a "shell-safe" filename for each item. If the visibleName
+        # contains any characters that might cause problems for shells
+        # (quotes, apostrophes, asterisk, question mark, colon, slash,
+        # backslash) replace them with underscores.
+        #
+        # If multiple UUIDs point to the same "pname", we're going to change
+        # the visibleName values for all UUIDs having that "pname" below, so
+        # the output filenames will be unique.
+
+        my $p   = ( $j->{'parent'} || '' ) ;
+        my $n   = cleanup_filename( $j->{'visibleName'} ) ;
+        my $pn  = "$p/$n" ;
+
+        $metadata{$uuid}->{'_safe_visibleName'} = $n ;
+
+        if ( exists( $pname{$pn} ) )
+        {
+            $pname{$pn} .= ",$uuid" ;
+            $pndup{$pn} = 1 ;
+        }
+        else
+        {
+            $pname{$pn} = $uuid ;
+        }
+    }
+
+    ########################################
+    # Find any duplicate "_safe_visibleName" values under the same parent,
+    # and add the UUID to the end of their _safe_visibleName values so they
+    # become unique within their directory.
+
+    blueline "De-duplicating visible names" ;
+
+    for my $pn ( keys %pndup )
+    {
+        if ( $pname{$pn} =~ m|,| )
+        {
+            for my $uuid ( split( /,/ , $pname{$pn} ) )
+            {
+                my $p = $metadata{$uuid}->{'parent'} ;
+                my $n = $metadata{$uuid}->{'_safe_visibleName'} . " ($uuid)" ;
+
+                print "$p/$n\n" ;
+
+                $metadata{$uuid}->{'_safe_visibleName'} = $n ;
+                $pname{"$p/$n"} = $uuid ;
+            }
+
+            delete $pname{$pn} ;
+        }
+    }
+
+    ########################################
+    # Build full path for each item
+
+    blueline "Building pathnames" ;
+
+    my $done_count = 0 ;
+    while ( $done_count < $doc_count )
+    {
+        for my $uuid ( sort keys %metadata )
+        {
+            next if ( exists $metadata{$uuid}->{'fullpath'} ) ;
+
+            my $p = $metadata{$uuid}->{'parent'} ;
+            my $n = $metadata{$uuid}->{'_safe_visibleName'} ;
+
+            if ( $p eq '' )
+            {
+                my $fp   = $n ;
+                my $tdir = 'docs' ;
+
+                $metadata{$uuid}->{'fullpath'} = $fp ;
+                $metadata{$uuid}->{'_tdir'} = $tdir ;
+                $fp_uuid{$fp} = $uuid ;
+
+                $done_count ++ ;
+                debug sprintf( "%36s %5s/%s\n" , $uuid , $tdir , $fp ) ;
+            }
+            elsif ( $p eq 'trash' )
+            {
+                my $fp   = $n ;
+                my $tdir = 'trash' ;
+
+                $metadata{$uuid}->{'fullpath'} = $fp ;
+                $metadata{$uuid}->{'_tdir'} = $tdir ;
+                $fp_uuid{$fp} = $uuid ;
+
+                $done_count ++ ;
+                debug sprintf( "%36s %5s/%s\n" , $uuid , $tdir , $fp ) ;
+            }
+            elsif ( exists( $metadata{$p}->{'fullpath'} ) )
+            {
+                my $fp   = $metadata{$p}->{'fullpath'} . "/$n" ;
+                my $tdir = $metadata{$p}->{'_tdir'} ;
+
+                $metadata{$uuid}->{'fullpath'} = $fp ;
+                $metadata{$uuid}->{'_tdir'} = $tdir ;
+                $fp_uuid{$fp} = $uuid ;
+
+                $done_count ++ ;
+                debug sprintf( "%36s %5s/%s\n" , $uuid , $tdir , $fp ) ;
+            }
+        }
+    }
+
+    ############################################################
+    # Create/update archive files
+
+    rm_r( "$out_dir/work" ) ;
+
+    for my $fp ( sort keys %fp_uuid )
+    {
+        my $uuid = $fp_uuid{$fp} ;
+        my $type = $metadata{$uuid}->{'type'} ;
+
+        if ( exists( $updoc{$uuid} ) )
+        {
+            $commit_msg .= sprintf( "%-36s %s\n" , $uuid , $fp ) ;
+        }
+
+        ########################################
+        # Don't create archives of "folders"
+        # TODO: create '.rmf' files?
+
+        next if ( $type eq 'CollectionType' ) ;
+
+        ########################################
+        # Calculate filenames and directory names
+
+        my $tdir        = $metadata{$uuid}->{'_tdir'} ;
+        my $wdir        = "work/$uuid" ;
+        my $odoc_rmdoc  = "rmdoc/$tdir/$fp.rmdoc" ;
+        my $odoc_rmn    = "rmn/$tdir/$fp.rmn" ;
+        my $odoc_pdf    = "pdf/$tdir/$fp.pdf" ;
+
+        ########################################
+        # Figure out if we need to save archives for this file
+
+        next unless (  exists( $updoc{$uuid} )
+                    || ( $out_rmdoc && ( ! -f "$out_dir/$odoc_rmdoc" ) )
+                    || ( $out_rmn   && ( ! -f "$out_dir/$odoc_rmn"   ) )
+                    || ( $out_pdf   && ( ! -f "$out_dir/$odoc_pdf"   ) ) ) ;
+
+        print "\n" ;
+        blueline "$uuid $fp" ;
+
+        ########################################
+        # If we're saving rmdoc or rmn, gather the document's raw files
+
+        if ( $out_rmdoc || $out_rmn )
+        {
+            print "Gathering files\n" ;
+
+            gather_files( $uuid , "$out_dir/$wdir" ) ;
+
+            ########################################
+            # If we're creating an '.rmdoc' file, do it
+
+            if ( $out_rmdoc )
+            {
+                print "Writing $out_dir/$odoc_rmdoc\n" ;
+
+                ( my $odir = "$out_dir/$odoc_rmdoc" ) =~ s|^(.*)/.*|$1| ;
+                mkdir_p( $odir ) ;
+                write_rmdoc( "$out_dir/$wdir" , "$out_dir/$odoc_rmdoc" ) ;
+                $up_files ++ ;
+            }
+
+            ########################################
+            # If we're creating an '.rmn' file, do it
+
+            if ( $out_rmn )
+            {
+                ########################################
+                # TODO: add .rmt file to $wdir ?
+
+                ########################################
+                # Build the .rmn file
+
+                print "Writing $out_dir/$odoc_rmn\n" ;
+
+                ( my $odir = "$out_dir/$odoc_rmn" ) =~ s|^(.*)/.*|$1| ;
+                mkdir_p( $odir ) ;
+                write_rmn( "$out_dir/$wdir" , "$out_dir/$odoc_rmn" ) ;
+                $up_files ++ ;
+            }
+        }
+
+        ########################################
+        # If we're downloading a PDF, do it
+
+        if ( $out_pdf )
+        {
+            print "Writing $out_dir/$odoc_pdf\n" ;
+
+            ( my $odir = "$out_dir/$odoc_pdf" ) =~ s|^(.*)/.*|$1| ;
+            mkdir_p( $odir ) ;
+            download_pdf( $uuid , "$out_dir/$odoc_pdf" ) ;
+            $up_files ++ ;
+        }
+
+        ########################################
+        # Remove the work directory (if one was created)
+
+        unless ( $keep_work )
+        {
+            print "Cleaning up\n" ;
+            rm_r( "$out_dir/$wdir" ) ;
+        }
+    }
+}
+
+########################################
+# Remove all work directories (just to be sure)
+
+unless ( $keep_work )
+{
+    rm_r( "$out_dir/work" ) ;
+}
+
+###############################################################################
+#
+# Maybe commit/push changes
+
+if ( $git_commit )
+{
+    if ( ! -d "$out_dir/.git" )
+    {
+        fail "ERROR: git_commit is true but '$out_dir' is not a git repository" ;
+    }
+
+    if ( $up_files > 0 )
+    {
+        blueline "Committing changes" ;
+
+        ########################################
+        # Write commit message to a file
+
+        my ( $cm_fh , $cm_filename ) = tempfile() ;
+        binmode( $cm_fh , ':encoding(UTF-8)' ) ;
+        print $cm_fh $commit_msg ;
+        close $cm_fh ;
+
+        ########################################
+        # Create the commit
+
+        my $vq = ( $verbose ? '' : 'q' ) ;
+
+        $cmd = "cd '$out_dir' && git add -A && git commit -${vq}F '$cm_filename'" ;
+        runit( $cmd )
+            or fail( "'$cmd' failed" ) ;
+
+        ########################################
+        # Remove the commit message file
+
+        unlink( $cm_filename ) ;
+
+        ########################################
+        # Maybe push the commit
+
+        if ( $git_push )
+        {
+            blueline "Pushing changes" ;
+
+            $cmd = "cd '$out_dir' && git push" ;
+            runit( $cmd )
+                or fail( "'$cmd' failed" ) ;
+        }
+    }
+    else
+    {
+        blueline "No changes found, nothing to commit" ;
+    }
+
+}
