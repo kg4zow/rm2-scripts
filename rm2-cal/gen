@@ -3,20 +3,23 @@
 # gen
 # jms1 2023-10-03
 #
-# generate sample PDF files
+# Last updated 2024-07-11
+#
+# Generate sample PDF files for Github
 
 set -e
 
 SPECS="
-2023
-2023,2025
-2023-10
-2023-10,2023-12
-2023-xx
-2023-10-01
-2023-10-01,2023-10-03
-2023-10-xx
-2023-xx-xx
+2024
+2024,2026
+2024-07
+2024-07,2024-09
+2024-xx
+2024-07-11
+2024-07-11,2024-07-14
+2024-07-xx
+2024-xx-xx
+2025-xx-xx
 "
 
 for SPEC in $SPECS
