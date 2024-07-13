@@ -20,7 +20,7 @@ The easiest way to install Ghostscript on macOS is to use [Homebrew](https://bre
 
 ### Linux
 
-Ghostscript is usually avaliable from your Linux distribution's package repositories, with the name "`ghostscript`".
+Ghostscript is usually available from your Linux distribution's package repositories, with the name "`ghostscript`".
 
 * CentOS, Fedora, etc. - `yum install ghostscript`
 
