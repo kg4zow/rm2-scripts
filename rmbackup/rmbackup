@@ -12,7 +12,7 @@
 # Copyright (C) 2024 John Simpson
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
-# copy of this software and associated documentation files (the “Software”),
+# copy of this software and associated documentation files (the "Software"),
 # to deal in the Software without restriction, including without limitation
 # the rights to use, copy, modify, merge, publish, distribute, sublicense,
 # and/or sell copies of the Software, and to permit persons to whom the
@@ -40,7 +40,7 @@ use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
 use JSON ;
 use LWP::UserAgent ;
 
-my $VERSION = '0.0.1' ;
+my $VERSION = '0.0.2 2024-07-13' ;
 
 ########################################
 # List of directories to be sync'ed from the tablet
@@ -886,51 +886,61 @@ $0 [options] DIR
 Back up the raw files from a reMarkable tablet.
 
 Backups for each tablet are stored in a "backup directory". The directory
-will contain an 'rmbackup.cfg' file, which tells the program what to do. It
-will also contain a 'serial.txt' file, with the serial number of the tablet.
-The program uses this to make sure it isn't mixing data from different
-tablets.
+will contain an 'rmbackup.cfg' file, which tells the program what to do. The
+idea is to edit this file once when you start using the program, to pre-set
+the kind of backups you want, then run the program on a regular basis
+without any options to actually perform the backups.
+
+The first time the program makes a backup, it will create a 'serial.txt'
+file in the backup directory, containing the tablet's serial number. Later
+backups will use this file to make sure it isn't mixing data from different
+tablets in the same backup directory.
 
 In the backup directory, a 'raw/' directory will contain copies of the raw
 files on the tablet's filesystem. The `rsync` command updates this directory
 every time a backup is done, and uses the list of which files were updated
 to figure out which notebooks changed since the previous backup.
 
-The program can optionally produce "archive" files from the raw files. These
-archives allow you to easily restore files to the tablet (or to a different
-tablet). "rmdoc" files can be uploaded using the built-in web browser (in
-tablet software 3.10 and later), and "rmn" files can be uploaded using RCU.
+The program can optionally build "archive" files from the raw files. These
+archive files can later be uploaded to the tablet (or to a different
+tablet). 'rmdoc' files can be uploaded using the built-in web browser (in
+tablet software 3.10 and later), and '.rmn' files can be uploaded using RCU.
+These files will be under the 'rmdoc/' and 'rmn/' directories.
 
 If the tablet's built-in web interface is enabled, the program can also
-download PDFs of the documents. These files *can* be uploaded back to the
-tablet, but if you do this, any pen strokes in the file will be part of the
-PDF "background images", and will not be edit-able.
+download PDFs of the documents, to a 'pdf/' directory. These PDF files *can*
+be uploaded back to the tablet, but if you do this, any pen strokes that
+were in the documents when the backup was made will now be part of the PDF
+"background images", and will not be edit-able.
 
 The program can also run 'git commit' and 'git push' commands after sync'ing
 the files and creating archives.
 
 -c, --create    Create the output directory with an 'rmbackup.cfg' file,
                 then immediately exit without doing a backup. The idea is,
-                you should edit this file and then run the script without
-                this option to actually do the backups.
-
+                you should edit this file to configure how backups are done,
+                and then run the program without any options (other than the
+                directory name) to actually perform the backups.
 
 -v, --verbose   Use the appropriate options to make 'rsync', 'tar', 'zip',
                 and 'git' commands show what they're doing. Without this,
                 options will be used to make these commands "quiet".
+                If you're using this option, you probably want '-x' as well.
 
 -m, --msg ___   Specify the first line of the commit message. If this is
-                specified, the program-generated commit message will be
-                added after it.
+                specified, the commit message that the program would normally
+                generate by itself, will be added after your custom message.
 
 -k, --keep      Don't delete the work directories used for building archives.
+                This is probably only useful if you're debugging this program.
 
--x              Show external commands being run.
+-x              Show the external commands being run.
 
 -D, --debug     Show debugging messages.
 
 -h, --help      Show this help message.
 
+Version: $VERSION
 
 EOF
 
@@ -1123,7 +1133,7 @@ EOF
     print <<EOF ;
 
 Please edit "$out_dir/rmbackup.cfg"
-as needed to set the options that the script will use when processing
+as needed to set the options that the program will use when processing
 this directory. Directions are in the file.
 
 In addition, if you plan to use git to track changes over time, you should
@@ -1141,9 +1151,10 @@ to that repo now, or whenever you have the URL of the remote repo.
 
     cd "$out_dir"
     git remote add origin URL
+    git push -u origin main
 
 Once the file has been edited and any git commands have been done, run
-this script again with the same directory, but without the '--create'
+this program again with the same directory, but without the '--create'
 option. For example ...
 
 $0 "$out_dir"
