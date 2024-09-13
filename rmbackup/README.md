@@ -8,6 +8,8 @@ The program can optionally produce "archive" files from the raw files. These arc
 
 If the tablet is connected via USB and the tablet's built-in web interface is enabled, the program can also download PDFs of the documents. When you do this, any pen strokes you may have added to the original file will become part of the PDF, and if you later upload the PDF back to a tablet, those pen strokes will not be edit-able.
 
+Tablets linked to a *paid* reMarkable cloud account now have the ability to make documents "cloud archives", where the document's metadata is still on the tablet but the content is only stored in the cloud. The program will skip these documents when creating `.rmdoc` or `.rmn` files, or when downloading PDF files.
+
 The program *can* also run "`git commit`" and "`git push`" commands before finishing. Obviously this requires that the backup directory be set up as a git repository, and optionally a git remote. This will be explained in more detail below.
 
 **Note:** Now that I have this working in Perl, I am also planning to write an equivalent program in Golang which does the same things.
@@ -125,15 +127,25 @@ Edit the `rmbackup.cfg` file. It will have comments explaining each option. Thes
 
 * `pdf` = whether or not to download `.pdf` files for each notebook.
 
-    The program *downloads* these files using the tablet's built-in web interface. Normally this is only available when connecting to the tablet via USB, however there are ways to "hack" the tablet so the web interface is available over wifi.
+    The program *downloads* these files using the tablet's built-in web interface. Normally this is only available when connecting to the tablet via USB, however there are ways to "hack" the tablet, such as ...
 
-* `pdf_wifi` = whether or not to allow PDFs to be downloaded when connecting to an IP address other than `10.11.99.1`.
+    * [webinterface-onboot](https://github.com/rM-self-serve/webinterface-onboot/) makes the tablet enable the web interface when `xochitl` (the "app" running on the tablet) starts. This is needed for the rM1, however it *might* not be needed on the rM2.
 
-    This should only be set to `true` if your tablet has been "hacked" so the web interface is available over wifi, *and* you plan to download PDF files.
+    * [webinterface-wifi](https://github.com/rM-self-serve/webinterface-wifi) makes the web interface available over wifi. Normally it can only be accessed via the USB cable.
+
+        **This one can be dangerous.** The tablet's web interface is not encrypted and has no authentication, so if you do this, anybody on your wifi network will be able to browse, download, and upload documents on your tablet, and you won't know anything about it while it's happening.)
+
+    * Other "hacks" are listed on the [remarkable.guide](https://remarkable.guide/tech/usb-web-interface.html) site (which is a good place to get started if you're interested in "hacking" on reMarkable tablets).
+
+    I'm not a *huge* fan of hacks like this which modify the `xochitl` binary itself, but if you *really* want to be able to download PDF files over wifi, these seem to be the only choice.
+
+* `pdf_wifi` = whether to download PDFs when connecting to the tablet using an IP address other than `10.11.99.1`. If this is not `true`, the script won't even *try* to download PDFs if connected to the tablet via wifi.
+
+    This should only be set to `true` if your tablet has been "hacked" so the web interface is available over wifi, and you plan to download PDF files.
 
 * `git_commit` = whether or not to run "`git commit`" after sync'ing files and creating or updating any archives.
 
-    The program will check for a "`.git/`" directory first.
+    The program will check for a "`.git/`" directory first, and will throw an error if the directory does not exist. Only set this to `true` if the git repo is ready to go. (See below for details.)
 
 * `git_push` = whether or not to run "`git push`" after running "`git commit`".
 
@@ -141,9 +153,11 @@ Edit the `rmbackup.cfg` file. It will have comments explaining each option. Thes
 
 ### Maybe: Set up a git repository
 
-You *can* use the directory as a git repository. If you do this, you will be able to view the history of the files, and access past versions of the files. Also, you *can* also link the repo to a remote server, such as Github or Keybase.
+You *can* use the directory as a git repository. If you do this, you will be able to view the history of the files, and access past versions of the files.
 
-Note that you are not *required* to set up a git repo, or to link it to a remote server. The program will check the backup directory for a `.git` directory when it finishes. If it exists, it will run a `git commit` command to save the files which changed since the previous commit.
+In addition, you *can* also link the git repo to a remote server, such as Github or Keybase.
+
+Note that you are not *required* to set up a git repo, or to link it to a remote server.
 
 In the backup directory (i.e. the directory containing the `rmbackup.cfg` file) ...
 
@@ -153,7 +167,7 @@ In the backup directory (i.e. the directory containing the `rmbackup.cfg` file) 
     git init -b main
     ```
 
-* Possibly update the `.gitignore` file. This tells the `git` command to ignore certain files when adding files or figuring out what changes were made.
+* Possibly create or update the `.gitignore` file. This tells the `git` command to ignore certain files when adding files or figuring out what changes were made.
 
     My primary OS is macOS, so all of my `.gitignore` files include the following:
 
@@ -177,7 +191,7 @@ In the backup directory (i.e. the directory containing the `rmbackup.cfg` file) 
 
 ### Maybe: Link to a remote Git server
 
-If you've created a git repo, you may want to synchronize it with a remote git service like Github or Keybase.
+If you've created a git repo, you may also want to synchronize it with a remote git service like Github or Keybase.
 
 Note that the exact process will depend on the remote server, but the process will normally look something like this.
 
@@ -252,3 +266,26 @@ If you haven't already done so, I strongly recommend you set up an SSH key pair 
 
 I wrote [this page](https://remarkable.jms1.info/info/ssh.html) a few months ago, to explain how to set this up.
 
+# Changelog
+
+### 2024-09-13 - v0.0.3
+
+* Checking for 'cloud archive' documents, not creating or downloading local files when these are found.
+    * Thanks to Julien Ma for [pointing this out](https://github.com/kg4zow/rm2-scripts/issues/5), I don't have a paid reMarkable cloud account so I never would have found this on my own.
+* Other minor updates to the `README.md` file.
+
+### 2024-07-20
+
+* Added changelog at the bottom of `README.md`.
+* Added information about "hacks" to make the web interface (1) always active, and (2) accessible via wifi.
+* Didn't commit/push at the time, this sat on my laptop's disk for a while. (Bad John, no coffee.) &#x1F928;
+
+### 2024-07-13 - v0.0.2
+
+* Updated initial generated config file
+* Added version number, updated `usage()` message
+
+### 2024-06-09 - (no version number)
+
+* Initial public release.
+* Added MIT license statement.

@@ -3,7 +3,7 @@
 # rmbackup
 # John Simpson <jms1@jms1.net> 2024-04-21
 #
-# Last updated 2024-06-01
+# Last updated 2024-09-13
 #
 ###############################################################################
 #
@@ -40,7 +40,7 @@ use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
 use JSON ;
 use LWP::UserAgent ;
 
-my $VERSION = '0.0.2 2024-07-13' ;
+my $VERSION = '0.0.3 2024-09-13' ;
 
 ########################################
 # List of directories to be sync'ed from the tablet
@@ -90,6 +90,7 @@ my $commit_msg      = '' ;      # -m=, --msg=
 my $keep_work       = 0 ;       # -k, --keep
 my $show_cmd        = 0 ;       # -x
 my $do_debug        = 0 ;       # -D, --debug
+my $local_port      = 56780 ;   # -L=
 
 my $out_dir         = '' ;
 
@@ -97,7 +98,7 @@ my $out_dir         = '' ;
 # Will be set from config file within the repo
 
 my $cfg_serial      = '' ;      # serial
-my $tablet          = '' ;      # tablet
+my $tablet          = '' ;      # tablet IP/hostname
 my $out_rmdoc       = 0 ;       # rmdoc
 my $out_rmn         = 0 ;       # rmn
 my $out_pdf         = 0 ;       # pdf
@@ -108,12 +109,15 @@ my $git_push        = 0 ;       # git_push
 ########################################
 # Other globals
 
+my $hwtype          = 0 ;       # hardware type: 1 or 2
+my $usbif           = '' ;      # name of USB interface
 my $serial          = '' ;      # serial number of connected tablet
 my $up_files        = 0 ;       # how many files were updated when sync'ing
 my $up_docs         = 0 ;       # how many documents (UUIDs) were updated
 my $up_other        = 0 ;       # how many non-document files were updated
 my %updoc           = () ;      # UUID => 1 if doc was updated
 my %fp_uuid         = () ;      # fullpath => UUID
+my $tablet_web      = '' ;      # tablet web interface IP/hostname
 
 my $ua              = new LWP::UserAgent( "rmbackup/$VERSION " ) ;
 
@@ -423,6 +427,8 @@ sub read_config()
     $out_rmn    = 0 ;
     $out_pdf    = 0 ;
 
+    $tablet_web = '' ;
+
     ########################################
     # Read serial.txt (if it exists)
     # - expected serial number
@@ -471,7 +477,8 @@ sub read_config()
         if ( $line =~ m|^\s*tablet\s*=\s*(\S+)|i )
         {
             $tablet = $1 ;
-            debug "\$tablet='$tablet'" ;
+            $tablet_web = "http://$tablet/" ;
+            debug "\$tablet='$tablet' \$tablet_web='$tablet_web'" ;
         }
         elsif ( $line =~ m|^\s*rmdoc\s*=\s*(\S+)|i )
         {
@@ -683,6 +690,22 @@ sub write_rmn($$)
 
 ###############################################################################
 #
+# Use a persistent SSH connection to do port forwarding
+
+sub ssh_start()
+{
+    my $cmd = "ssh -L localhost:${local_port}:10.11.99.1:80 root\@$(tablet)" ;
+
+
+
+}
+
+sub ssh_end()
+{
+}
+
+###############################################################################
+#
 # Verify that the talet's web interface is enabled
 
 sub verify_web()
@@ -690,14 +713,13 @@ sub verify_web()
     ########################################
     # Build the request
 
-    my $url = "http://$tablet/" ;
-    my $req = new HTTP::Request( GET => $url ) ;
+    my $req = new HTTP::Request( GET => $tablet_web ) ;
     $req->content_type( 'text/plain' ) ;
 
     ########################################
     # Execute the request
 
-    debug "verify_web(): requesting $url" ;
+    debug "verify_web(): requesting $tablet_web" ;
     my $res = $ua->request( $req ) ;
 
     ########################################
@@ -709,10 +731,22 @@ sub verify_web()
         return ;
     }
 
+    ############################################################
+    # rM2 only
+
     ########################################
+    # If tablet IP is not 10.11.99.1
+    # - set up an SSH connection with port forwarding
+    # - manually assign IP and enable interface
+    # - change $tablet_web
+
+    ########################################
+    # If web interface is not running, start it
+
+    ############################################################
     # The request failed
 
-    redline "ERROR: unable to connect to $url" ;
+    redline "ERROR: unable to connect to $tablet_web" ;
     print $res->status_line() ;
 
     print <<EOF ;
@@ -740,7 +774,7 @@ sub download_pdf($$)
     ########################################
     # Build the request
 
-    my $url = "http://$tablet/download/$uuid/placeholder" ;
+    my $url = "http://$tablet_web/download/$uuid/placeholder" ;
     my $req = new HTTP::Request( GET => $url ) ;
 
     ########################################
@@ -931,6 +965,12 @@ the files and creating archives.
                 specified, the commit message that the program would normally
                 generate by itself, will be added after your custom message.
 
+-L ___          For rM2 tablets, it's possible to trick the tablet into making
+                the web interface accessible via SSH tunneling. This requires
+                a port number on the local machine. This parameter specifies
+                the local port number. The value must be 1024-65535, default
+                is 56780.
+
 -k, --keep      Don't delete the work directories used for building archives.
                 This is probably only useful if you're debugging this program.
 
@@ -963,6 +1003,7 @@ GetOptions(
     'D|debug'           => \$do_debug ,
     'h|?|help|usage'    => sub{ usage() ; } ,
     'k|keep'            => \$keep_work ,
+    'L='                => \$local_port ,
     'm|msg=s'           => \$commit_msg ,
     'v|verbose'         => \$verbose ,
     'x'                 => \$show_cmd ,
@@ -976,6 +1017,16 @@ $commit_msg =~ s|\s+$||s ;
 if ( $commit_msg ne '' )
 {
     $commit_msg .= "\n\n" ;
+}
+
+########################################
+# Make sure $local_port is valid
+
+if (    ( $local_port !~ m|^\d+$| )
+     || ( $local_port < 1024      )
+     || ( $local_port > 65535     ) )
+{
+    usage( "ERROR: local port (-L) must be 1024-65535\n" ) ;
 }
 
 ########################################
@@ -1215,15 +1266,15 @@ elsif ( $git_push )
 }
 
 ########################################
-# Get the tablet's serial number
-# - stored in bytes 0004-0012 of
+# Get the tablet's hardware type and serial number
+# - serial is stored in bytes 0004-0012 of
 #   - rM1: /dev/mmcblk1boot1
 #   - rM2: /dev/mmcblk2boot1
 
-blueline "Getting tablet's serial number" ;
+blueline "Getting tablet's hardware type and serial number" ;
 
-my $rcmd = 'if [[ -e /dev/mmcblk1boot1 ]] ; then DEV=1 ; '
-         . 'elif [[ -e /dev/mmcblk2boot1 ]] ; then DEV=2 ; '
+my $rcmd = 'if [[ -e /dev/mmcblk1boot1 ]] ; then DEV=1 ; echo -n "1," ; '
+         . 'elif [[ -e /dev/mmcblk2boot1 ]] ; then DEV=2 ; echo -n "2," ; '
          . 'else exit 1 ; fi ; '
          . 'dd bs=1 skip=4 count=15 if=/dev/mmcblk${DEV}boot1 2>/dev/null' ;
 
@@ -1232,9 +1283,24 @@ my $cmd = "ssh $ssh_options root\@$tablet '$rcmd'" ;
 $show_cmd && greenline "+ $cmd" ;
 open( I , "$cmd |" )
     or fail "ERROR: $!\n" ;
-$serial = <I> ;
-chomp $serial ;
+my $input = <I> ;
+chomp $input ;
 close I ;
+
+( $hwtype , $serial ) = split( /,/ , $input ) ;
+
+if ( $hwtype eq '1' )
+{
+    $usbif = 'usb0' ;
+}
+elsif ( $hwtype eq '2' )
+{
+    $usbif = 'usb1' ;
+}
+else
+{
+    fail "ERROR: unknown hardware type '$hwtype'\n" ;
+}
 
 ########################################
 # If the config file contained a serial number,
@@ -1372,6 +1438,20 @@ if ( $out_rmdoc || $out_rmn || $out_pdf )
         {
             $pname{$pn} = $uuid ;
         }
+
+        ########################################
+        # If a UUID.cloudarchive file exists, mark it as a "cloud archive"
+        # - '.rmdoc' and '.rmn' files created from these documents would be
+        #   incomplete and therefore useless
+        # - Trying to download a PDF of these documents can "lockup" the
+        #   tablet's internal web server
+
+        ( my $caf = $f ) =~ s|\.metadata$|.cloudarchive| ;
+
+        if ( -f $caf )
+        {
+            $metadata{$uuid}->{'_cloudarchive'} = 1 ;
+        }
     }
 
     ########################################
@@ -1494,6 +1574,15 @@ if ( $out_rmdoc || $out_rmn || $out_pdf )
 
         print "\n" ;
         blueline "$uuid $fp" ;
+
+        ########################################
+        # Don't try to download or create archives of 'cloud archives'
+
+        if ( $metadata{$uuid}->{'_cloudarchive'} )
+        {
+            print "Skipping 'cloud archive' file\n" ;
+            next ;
+        }
 
         ########################################
         # If we're saving rmdoc or rmn, gather the document's raw files
