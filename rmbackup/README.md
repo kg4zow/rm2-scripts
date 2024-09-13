@@ -268,7 +268,12 @@ I wrote [this page](https://remarkable.jms1.info/info/ssh.html) a few months ago
 
 # Changelog
 
-### 2024-09-13 - v0.0.3
+### 2024-09-13 - v0.0.4
+
+* Fixed bugs related to new functionality I haven't finished writing yet, let alone tested it.
+    * When I tested v0.0.3 this morning, I was using my laptop instead of my regular machine, and accidentally ran the 2024-07-20 version (which was earlier in my PATH) instead of running the version I had just modified. This is what happens when you try to write code with a single cup of coffee.
+
+### 2024-09-13 - v0.0.3 - DO NOT USE
 
 * Checking for 'cloud archive' documents, not creating or downloading local files when these are found.
     * Thanks to Julien Ma for [pointing this out](https://github.com/kg4zow/rm2-scripts/issues/5), I don't have a paid reMarkable cloud account so I never would have found this on my own.

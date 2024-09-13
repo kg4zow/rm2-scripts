@@ -40,7 +40,7 @@ use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
 use JSON ;
 use LWP::UserAgent ;
 
-my $VERSION = '0.0.3 2024-09-13' ;
+my $VERSION = '0.0.4 2024-09-13' ;
 
 ########################################
 # List of directories to be sync'ed from the tablet
@@ -90,7 +90,6 @@ my $commit_msg      = '' ;      # -m=, --msg=
 my $keep_work       = 0 ;       # -k, --keep
 my $show_cmd        = 0 ;       # -x
 my $do_debug        = 0 ;       # -D, --debug
-my $local_port      = 56780 ;   # -L=
 
 my $out_dir         = '' ;
 
@@ -690,22 +689,6 @@ sub write_rmn($$)
 
 ###############################################################################
 #
-# Use a persistent SSH connection to do port forwarding
-
-sub ssh_start()
-{
-    my $cmd = "ssh -L localhost:${local_port}:10.11.99.1:80 root\@$(tablet)" ;
-
-
-
-}
-
-sub ssh_end()
-{
-}
-
-###############################################################################
-#
 # Verify that the talet's web interface is enabled
 
 sub verify_web()
@@ -774,7 +757,7 @@ sub download_pdf($$)
     ########################################
     # Build the request
 
-    my $url = "http://$tablet_web/download/$uuid/placeholder" ;
+    my $url = $tablet_web . "download/$uuid/placeholder" ;
     my $req = new HTTP::Request( GET => $url ) ;
 
     ########################################
@@ -965,12 +948,6 @@ the files and creating archives.
                 specified, the commit message that the program would normally
                 generate by itself, will be added after your custom message.
 
--L ___          For rM2 tablets, it's possible to trick the tablet into making
-                the web interface accessible via SSH tunneling. This requires
-                a port number on the local machine. This parameter specifies
-                the local port number. The value must be 1024-65535, default
-                is 56780.
-
 -k, --keep      Don't delete the work directories used for building archives.
                 This is probably only useful if you're debugging this program.
 
@@ -1003,7 +980,6 @@ GetOptions(
     'D|debug'           => \$do_debug ,
     'h|?|help|usage'    => sub{ usage() ; } ,
     'k|keep'            => \$keep_work ,
-    'L='                => \$local_port ,
     'm|msg=s'           => \$commit_msg ,
     'v|verbose'         => \$verbose ,
     'x'                 => \$show_cmd ,
@@ -1017,16 +993,6 @@ $commit_msg =~ s|\s+$||s ;
 if ( $commit_msg ne '' )
 {
     $commit_msg .= "\n\n" ;
-}
-
-########################################
-# Make sure $local_port is valid
-
-if (    ( $local_port !~ m|^\d+$| )
-     || ( $local_port < 1024      )
-     || ( $local_port > 65535     ) )
-{
-    usage( "ERROR: local port (-L) must be 1024-65535\n" ) ;
 }
 
 ########################################
