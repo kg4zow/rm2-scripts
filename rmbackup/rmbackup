@@ -3,7 +3,7 @@
 # rmbackup
 # John Simpson <jms1@jms1.net> 2024-04-21
 #
-# Last updated 2024-09-13
+# Last updated 2024-09-16
 #
 ###############################################################################
 #
@@ -34,13 +34,15 @@
 require 5.005 ;
 use strict ;
 
+use open qw( :std :encoding(UTF-8) ) ;
+
 use Cwd qw( abs_path ) ;
 use File::Temp qw( tempfile ) ;
 use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
 use JSON ;
 use LWP::UserAgent ;
 
-my $VERSION = '0.0.4 2024-09-13' ;
+my $VERSION = '0.0.5 2024-09-16' ;
 
 ########################################
 # List of directories to be sync'ed from the tablet
@@ -150,6 +152,13 @@ sub greenline(@)
     my $msg = join( '' , @_ ) ;
     $msg =~ s|\s+$||s ;
     printf "\e[0;1;37;42m%s\e[0K\e[0m\n"  , $msg ;
+}
+
+sub cyanline(@)
+{
+    my $msg = join( '' , @_ ) ;
+    $msg =~ s|\s+$||s ;
+    printf "\e[0;1;37;46m%s\e[0K\e[0m\n"  , $msg ;
 }
 
 sub fail(@)
@@ -1546,7 +1555,7 @@ if ( $out_rmdoc || $out_rmn || $out_pdf )
 
         if ( $metadata{$uuid}->{'_cloudarchive'} )
         {
-            print "Skipping 'cloud archive' file\n" ;
+            cyanline "Skipping 'cloud archive' file" ;
             next ;
         }
 
