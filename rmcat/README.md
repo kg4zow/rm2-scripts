@@ -140,6 +140,18 @@ Note that [rmdoc2rmn and rmn2rmdoc](../rmdoc-convert/README.md) are shell script
     * how are PDF-backed pages tracked in `UUID.content`? how is this different from normal pages?
     * how to handle things when the PDF is not the first input file, i.e. adjust page numbers?
 
+# Changelog
+
+### 2024-09-28 v0.1.1
+
+- Fixes for https://github.com/kg4zow/rm2-scripts/issues/6
+- Explicitly remove the work directory at the end, rather than relying on `END{}` (which causes an error message if you run the script without actually building an output file, like running it with `-h`).
+- Run the 'mv' command to save an `.rmdoc` output file, rather than using `rename()`. This way if the work directory is on a different filesystem than where the output file needs to be written, it actually *works*.
+
+### 2024-07-12 (no version)
+
+- Initial public release.
+
 # License
 
 The MIT License (MIT)

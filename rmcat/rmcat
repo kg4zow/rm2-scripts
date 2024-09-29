@@ -6,6 +6,8 @@
 # Combine the pages from one or more reMarkable document files into a single
 # reMarkable document. Works with '.rmn' and '.rmdoc' files.
 #
+# Last update: 2024-09-28
+#
 ###############################################################################
 #
 # The MIT License (MIT)
@@ -39,6 +41,8 @@ use warnings ;
 use File::Temp qw ( tempdir ) ;
 use Getopt::Long qw ( :config require_order bundling ) ;
 use JSON ;
+
+my $VERSION = '0.1.1 2024-09-28' ;
 
 ########################################
 # globals
@@ -189,6 +193,8 @@ script will use the appropriate format automatically.
 Also, this script cannot combine reMarkable documents containing PDF files
 (i.e. which were originally created from EPUB or PDF files) with other
 documents, however it can convert them between '.rmdoc' to '.rmn' formats.
+
+Version: $VERSION
 
 EOF
 
@@ -772,8 +778,6 @@ my $now_ts = sprintf( '%04d-%02d-%02dT%02d%02d%02dZ' ,
 
 $owdir = tempdir() ;
 
-END { $keep_temp || rm_r( $owdir ) ; }
-
 ########################################
 # Generate output document's UUID and create its directories
 
@@ -829,8 +833,7 @@ if ( $out_format eq 'rmdoc' )
 {
     runit "( cd '$owdir' ; zip -r $zip_opt output.rmdoc * )" ;
 
-    $set_x && print "+ mv '$owdir/output.rmdoc' '$outfile'\n" ;
-    rename( "$owdir/output.rmdoc" , $outfile ) ;
+    runit "mv '$owdir/output.rmdoc' '$outfile'" ;
 }
 elsif ( $out_format eq 'rmn' )
 {
@@ -842,4 +845,13 @@ else
     # this should never happen, but just in case
 
     die "FATAL: unknown \$out_format='$out_format' (this is a bug)\n" ;
+}
+
+###############################################################################
+#
+# Maybe clean up after ourselves
+
+unless ( $keep_temp )
+{
+    rm_r( $owdir ) ;
 }
