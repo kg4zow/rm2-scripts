@@ -268,6 +268,16 @@ I wrote [this page](https://remarkable.jms1.info/info/ssh.html) a few months ago
 
 # Changelog
 
+### 2024-09-30 - v0.6
+
+* Added support for reMarkable Paper Pro
+    * the only real change was figuring out how to read its serial number
+
+### 2024-09-16 - v0.0.5
+
+* Highlight "skipping cloud archive" messages
+* Better support for UTF-8 characters in display names
+
 ### 2024-09-13 - v0.0.4
 
 * Fixed bugs related to new functionality I haven't finished writing yet, let alone tested it.

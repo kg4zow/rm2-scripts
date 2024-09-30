@@ -3,7 +3,7 @@
 # rmbackup
 # John Simpson <jms1@jms1.net> 2024-04-21
 #
-# Last updated 2024-09-16
+# Last updated 2024-09-30
 #
 ###############################################################################
 #
@@ -42,7 +42,7 @@ use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
 use JSON ;
 use LWP::UserAgent ;
 
-my $VERSION = '0.0.5 2024-09-16' ;
+my $VERSION = '0.6 2024-09-30' ;
 
 ########################################
 # List of directories to be sync'ed from the tablet
@@ -110,8 +110,6 @@ my $git_push        = 0 ;       # git_push
 ########################################
 # Other globals
 
-my $hwtype          = 0 ;       # hardware type: 1 or 2
-my $usbif           = '' ;      # name of USB interface
 my $serial          = '' ;      # serial number of connected tablet
 my $up_files        = 0 ;       # how many files were updated when sync'ing
 my $up_docs         = 0 ;       # how many documents (UUIDs) were updated
@@ -1242,40 +1240,30 @@ elsif ( $git_push )
 
 ########################################
 # Get the tablet's hardware type and serial number
-# - serial is stored in bytes 0004-0012 of
-#   - rM1: /dev/mmcblk1boot1
-#   - rM2: /dev/mmcblk2boot1
+# - serial is stored in
+#   - rM1:  /dev/mmcblk1boot1 bytes 0x0004-0012
+#   - rM2:  /dev/mmcblk2boot1 bytes 0x0004-0012
+#   - rMPP: run 'csl serialnumbers device'
+#           (or /dev/mmcblk0boot1 bytes 0x3FF869-3FF877)
 
 blueline "Getting tablet's hardware type and serial number" ;
 
-my $rcmd = 'if [[ -e /dev/mmcblk1boot1 ]] ; then DEV=1 ; echo -n "1," ; '
-         . 'elif [[ -e /dev/mmcblk2boot1 ]] ; then DEV=2 ; echo -n "2," ; '
-         . 'else exit 1 ; fi ; '
-         . 'dd bs=1 skip=4 count=15 if=/dev/mmcblk${DEV}boot1 2>/dev/null' ;
+my $rcmd = 'if [[ -x /usr/bin/csl ]] ; '
+         .      'then csl serialnumbers device ; '
+         . 'elif [[ -e /dev/mmcblk1boot1 ]] ; '
+         .      'then dd bs=1 skip=4 count=15 if=/dev/${DEV} 2>/dev/null ; '
+         . 'elif [[ -e /dev/mmcblk2boot1 ]] ; '
+         .      'then dd bs=1 skip=4 count=15 if=/dev/${DEV} 2>/dev/null ; '
+         . 'else exit 1 ; fi' ;
 
 my $cmd = "ssh $ssh_options root\@$tablet '$rcmd'" ;
 
 $show_cmd && greenline "+ $cmd" ;
 open( I , "$cmd |" )
     or fail "ERROR: $!\n" ;
-my $input = <I> ;
-chomp $input ;
+$serial = <I> ;
+chomp $serial ;
 close I ;
-
-( $hwtype , $serial ) = split( /,/ , $input ) ;
-
-if ( $hwtype eq '1' )
-{
-    $usbif = 'usb0' ;
-}
-elsif ( $hwtype eq '2' )
-{
-    $usbif = 'usb1' ;
-}
-else
-{
-    fail "ERROR: unknown hardware type '$hwtype'\n" ;
-}
 
 ########################################
 # If the config file contained a serial number,
