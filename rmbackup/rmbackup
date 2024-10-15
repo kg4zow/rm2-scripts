@@ -3,7 +3,7 @@
 # rmbackup
 # John Simpson <jms1@jms1.net> 2024-04-21
 #
-# Last updated 2024-09-30
+# Last updated 2024-10-14
 #
 ###############################################################################
 #
@@ -42,7 +42,7 @@ use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
 use JSON ;
 use LWP::UserAgent ;
 
-my $VERSION = '0.6 2024-09-30' ;
+my $VERSION = '0.7 2024-10-14' ;
 
 ########################################
 # List of directories to be sync'ed from the tablet
@@ -117,6 +117,9 @@ my $up_other        = 0 ;       # how many non-document files were updated
 my %updoc           = () ;      # UUID => 1 if doc was updated
 my %fp_uuid         = () ;      # fullpath => UUID
 my $tablet_web      = '' ;      # tablet web interface IP/hostname
+my %last_name       = () ;      # last run: UUID => "docs/dir/Display Name"
+my %this_name       = () ;      # this run: UUID => "docs/dir/Display Name"
+my %tombstone       = () ;      # UUID => 1 for tombstone files
 
 my $ua              = new LWP::UserAgent( "rmbackup/$VERSION " ) ;
 
@@ -604,6 +607,47 @@ sub read_config()
 
 ###############################################################################
 #
+# Read 'names.txt' into memory
+
+sub read_names()
+{
+    %last_name = () ;
+
+    if ( open( N , '<' , 'names.txt' ) )
+    {
+        while ( my $line = <N> )
+        {
+            $line =~ s|\s+$|| ;
+            $line =~ s|^\s*#.*|| ;
+            next unless ( $line ne '' ) ;
+
+            my ( $uuid , $name ) = split( /\s+/ , $line , 2 ) ;
+            $last_name{$uuid} = $name ;
+        }
+        close N ;
+    }
+}
+
+###############################################################################
+#
+# Write 'names.txt' file
+
+sub write_names()
+{
+    open( N , '>' , 'names.txt' )
+        or fail "ERROR: can't create \"generated.txt\": $!\n" ;
+
+    for my $uuid ( sort keys %this_name )
+    {
+        my $name = $this_name{$uuid} ;
+        print N "$uuid $name\n" ;
+    }
+
+    close N ;
+}
+
+###############################################################################
+#
 # Gather files for a UUID into a work directory
 
 sub gather_files($$)
@@ -807,7 +851,7 @@ sub cleanup_filename($)
 {
     my $filename = shift ;
 
-    $filename =~ s,["'\*\?:;/\\\[\]{}<>\|\$],_,g ;
+    $filename =~ s,["'\*\?:;/\\\[\]{}<>\|\$\`],_,g ;
 
     return $filename ;
 }
@@ -861,6 +905,8 @@ sub rsync($;@)
     # Run the command
     # - If the output contains any filenames which are reMarkable documents,
     #   extract the UUID and remember the UUID as "changed"
+    # - If the output contains any *.tombstone files,
+    #   extract the UUID and remember it
 
     $show_cmd && greenline "+ $cmd" ;
 
@@ -881,7 +927,12 @@ sub rsync($;@)
         $verbose || print $line ;
         $up_files ++ ;
 
-        if ( $line =~ m|(remarkable/xochitl/([0-9a-f\-]{36})[\./].*)|i )
+        if ( $line =~ m|([0-9a-f\-]{36})\.tombstone|i )
+        {
+            my $uuid = $1 ;
+            $tombstone{$uuid} = 1 ;
+        }
+        elsif ( $line =~ m|(remarkable/xochitl/([0-9a-f\-]{36})[\./].*)|i )
         {
             my ( $upfile , $uuid ) = ( $1 , $2 ) ;
             $updoc{$uuid} = 1 ;
@@ -1500,6 +1551,8 @@ if ( $out_rmdoc || $out_rmn || $out_pdf )
     ############################################################
     # Create/update archive files
 
+    blueline "Creating/updating archive files" ;
+
     rm_r( "$out_dir/work" ) ;
 
     for my $fp ( sort keys %fp_uuid )
@@ -1526,6 +1579,11 @@ if ( $out_rmdoc || $out_rmn || $out_pdf )
         my $odoc_rmdoc  = "rmdoc/$tdir/$fp.rmdoc" ;
         my $odoc_rmn    = "rmn/$tdir/$fp.rmn" ;
         my $odoc_pdf    = "pdf/$tdir/$fp.pdf" ;
+
+        ########################################
+        # Remember this UUID's output name for next time
+
+        $this_name{$uuid} = "$tdir/$fp" ;
 
         ########################################
         # Figure out if we need to save archives for this file
@@ -1611,6 +1669,36 @@ if ( $out_rmdoc || $out_rmn || $out_pdf )
             rm_r( "$out_dir/$wdir" ) ;
         }
     }
+
+    ############################################################
+    # Do last run's output files need to be removed?
+    # - if $last_name{$uuid} is not empty
+    #   - if UUID is a tombstone
+    #   - if "this" filename is different than "last" filename
+
+    blueline "Removing old archive files" ;
+
+    read_names() ;
+
+    for my $uuid ( sort keys %last_name )
+    {
+        if ( exists( $tombstone{$uuid} )
+             || ( ( $this_name{$uuid} || '' ) ne $last_name{$uuid} ) )
+        {
+            my $base = $last_name{$uuid} ;
+            for my $ext ( qw ( pdf rmdoc rmn ) )
+            {
+                if ( -f "$ext/$base.$ext" )
+                {
+                    print "rm '$out_dir/$ext/$base.$ext'\n" ;
+                    unlink( "$out_dir/$ext/$base.$ext" )
+                        or fail "unlink(): $!\n" ;
+                }
+            }
+        }
+    }
+
+    write_names() ;
 }
 
 ########################################
