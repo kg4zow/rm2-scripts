@@ -40,8 +40,26 @@ function make_small {
 ###############################################################################
 ###############################################################################
 
-./rm2-template-basic
+rm -rf rm12 rmpp
+mkdir rm12 rmpp
 
-make_small dots-50.png
-make_small basic-page.png
-make_small daily-work.png
+./rm2-template-basic -D rm12        -P -r
+./rm2-template-basic -D rm12        -P -l
+./rm2-template-basic -D rm12        -L -r
+./rm2-template-basic -D rm12        -L -l
+
+./rm2-template-basic -D rmpp -p -d58 -P -r
+./rm2-template-basic -D rmpp -p -d58 -P -l
+./rm2-template-basic -D rmpp -p -d58 -L -r
+./rm2-template-basic -D rmpp -p -d58 -L -l
+
+for PRE in rm12/P rm12/L rmpp/P rmpp/L
+do
+    make_small "${PRE}-dots-only.png"
+
+    for SUF in rh lh
+    do
+        make_small "${PRE}-basic-page-${SUF}.png"
+        make_small "${PRE}-daily-work-${SUF}.png"
+    done
+done

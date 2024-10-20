@@ -5,55 +5,244 @@
 #
 # Programmatically create PNG files for use as reMarkable 2 templates.
 #
-# 2023-07-09 jms1 - renamed script
+# 2024-10-19 jms1 - updated for rMPP
+# - sizes and positions are now calculated based on page size
+# - distance between "background dots" is now configurable via
+#   command line option
+# - column widths and other things *can* be configured by editing variables
+#   in the script
 
 set -e
 
+########################################
+# Physical screen sizes
+
+W_RM12="1404"           # Width of rM1/rM2 screen
+H_RM12="1872"           # Height of rM1/rM2 screen
+W_RMPP="1620"           # Width of rMPP screen
+H_RMPP="2160"           # Height of rMPP screen
+
+########################################
+# Other fixed but configurable measurements
+
+W_MENU="104"            # Width of menu bar on left (104 or 120)
+H_TITLE="120"           # Height of "title bar" across the top
+W_CLOSE="104"           # Width of box around  the (X) close button
+
+W_DATE="620"            # Width of "Date" box in title bar
+W_TIMES="360"           # Width of "Times" box in title bar
+W_HOURS="200"           # Width of "Hours" box in title bar
+
+H_HEADER="50"           # Height of column header
+W_DONE="100"            # Wdith of "Done" column
+W_TICKET="230"          # Width of "Time/Ticket" column
+W_REL="200"             # Width of "Relase" column
+
 ###############################################################################
 #
-# Create a basic page with dots every 50 pixels
+# Usage message
+
+function usage {
+    MSG="$*"
+
+    cat <<EOF
+$0 [options]
+
+Generate basic templates for rM1/rM2 and/or rMPP.
+
+-d ___  Specify the "dot pitch", i.e. how many pixels between the dots in the
+        background. Default is 50.
+
+-p      Generate templates for rMPP (1620x2160). Without this, the script
+        will generate templates for the rM1/rM2 (1404x1872).
+
+-l, -r  Generate left-handed (menu on the right) or right-handed (menu on the
+        left) templates. Default is right-handed.
+
+-L, -P  Generate landscape (wider than tall) or portrait (taller than wide)
+        templates. Default is portrait.
+
+-D ___  Write template files in the indicated directory.
+
+-x      Show the 'magick' commands being executed.
+
+-h      Show this help message.
+
+EOF
+
+    if [[ -n "$MSG" ]]
+    then
+        echo "$MSG"
+        exit 1
+    fi
+
+    exit 0
+}
+
+###############################################################################
 #
-# - Create a 50x50 canvas, filled with white.
+# Maybe print a command before executing it
+
+SET_X="${SET_X:-false}"
+
+function set_x {
+    if [[ "${SET_X:-false}" == "true" ]]
+    then
+        local IFS=$' '
+        echo "$PS4$*" 1>&2
+    fi
+    "$@"
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+#
+# Parse the command line
+
+DOT_SEP="50"
+RMPP=false
+LEFT_HAND=false
+LANDSCAPE=false
+OF_DIR="."
+
+while getopts ':hxd:plrLPD:' OPT
+do
+    case $OPT in
+        h)  usage
+            ;;
+        x)  SET_X=true
+            ;;
+        d)  DOT_SEP="$OPTARG"
+            ;;
+        p)  RMPP=true
+            ;;
+        l)  LEFT_HAND=true
+            ;;
+        r)  LEFT_HAND=false
+            ;;
+        L)  LANDSCAPE=true
+            ;;
+        P)  LANDSCAPE=false
+            ;;
+        D)  OF_DIR="$OPTARG"
+            ;;
+        *)  usage "ERROR: unknown option '-$OPTARG'"
+            ;;
+    esac
+done
+shift $(( OPTIND - 1 ))
+
+########################################
+# Set page size based on tablet type and orientation
+# - also set filename prefix
+
+if $RMPP
+then
+    W_PAGE=$W_RMPP
+    H_PAGE=$H_RMPP
+else
+    W_PAGE=$W_RM12
+    H_PAGE=$H_RM12
+fi
+
+if $LANDSCAPE
+then
+    X_TEMP=$W_PAGE
+    W_PAGE=$H_PAGE
+    H_PAGE=$X_TEMP
+
+    OF_PREFIX="${OF_DIR:-.}/L-"
+else
+    OF_PREFIX="${OF_DIR:-.}/P-"
+fi
+
+########################################
+# Set filename suffix
+
+if $LEFT_HAND
+then
+    OF_SUFFIX="-lh"
+else
+    OF_SUFFIX="-rh"
+fi
+
+###############################################################################
+#
+# Create a basic page with dots every $PITCH pixels
+#
+# - Create a $DOT_SEP x $DOT_SEP canvas, filled with white.
 # - Draw a 3x3 rectangle at the top left corner.
 # - Save that to a "memory buffer" called 'dot'.
 # - Delete the canvas.
-# - Create a 1404x1872 canvas, filled with the 'dot' memory buffer, tiled.
-# - Save the result as 'dots-50.png'
+# - Create a $W_PAGE x $H_PAGE canvas, filled with the 'dot' memory buffer, tiled.
+# - Save the result as 'dots-only.png'
 
-magick \
-    -type GrayScale -depth 8 -size 50x50 'xc:white' \
+set_x magick \
+    -type GrayScale -depth 8 -size "${DOT_SEP}x${DOT_SEP}" 'xc:white' \
     -fill black \
     -draw 'rectangle 0,0,2,2' \
     -write 'mpr:dot' \
     +delete \
-    -type GrayScale -depth 8 -size 1404x1872 'tile:mpr:dot' \
-    dots-50.png
+    -type GrayScale -depth 8 -size "${W_PAGE}x${H_PAGE}" 'tile:mpr:dot' \
+    "${OF_PREFIX}dots-only.png"
 
 ###############################################################################
 #
 # Create what I call a "basic page".
 #
-# - Create a canvas from the 'dots-50.png' file created above.
+# - Create a canvas from the 'dots-only.png' file created above.
 # - Remove (draw a white rectangle over) 120 pixels at the top of the image.
 # - Draw dark grey rectangles where the menu and "X" button appear.
 # - Draw black lines between the different areas of the image.
 # - Save the result as 'basic-page.png'.
 
-magick dots-50.png \
+if $LEFT_HAND
+then
+    X_MS=$(( W_PAGE - W_MENU ))     # X: menu separator line
+    X_ML=$(( X_MS + 1 ))            # X: menu shading left edge
+    X_MR=$(( W_PAGE - 1 ))          # X: menu shading right edge
+
+    X_CBS=$W_CLOSE                  # X: close box separator line
+    X_CBL=0                         # X: close box shading left edge
+    X_CBR=$(( X_CBS - 1 ))          # X: close box shading right edge
+    Y_CBB=$(( H_TITLE - 1 ))        # Y: close box shading bottom
+
+    X_LEFT=0                        # X: left side of main drawing area
+    X_RIGHT=$(( X_MS - 1 ))         # X: right side of main drawing area
+else
+    X_MS=$W_MENU                    # X: menu separator line
+    X_ML=0                          # X: menu shading left edge
+    X_MR=$(( X_MS - 1 ))            # X: menu shading right edge
+
+    X_CBS=$(( W_PAGE -  W_CLOSE ))  # X: close box separator line
+    X_CBL=$(( X_CBS + 1 ))          # X: close box shading left edge
+    X_CBR=$(( W_PAGE - 1 ))         # X: "close box" shading right edge
+    Y_CBB=$(( H_TITLE - 1 ))        # Y: bottom of "close box" shading
+
+    X_LEFT=$W_MENU                  # X: left side of main drawing area
+    X_RIGHT=$(( W_PAGE - 1 ))       # X: right side of main drawing area
+fi
+
+Y_TITLE=$H_TITLE                    # Y: bottom edge of "title bar" across top
+Y_TMID=$(( Y_TITLE / 2 ))           # Y: middle of title bar
+Y_BOTTOM=$(( H_PAGE - 1 ))          # Y: bottom edge of page
+
+set_x magick "${OF_PREFIX}dots-only.png" \
     \
     -fill white \
-    -draw 'rectangle 0 0 1403 119' \
+    -draw "rectangle 0 0 $X_RIGHT $Y_TITLE" \
     \
-    -fill '#808080' \
-    -draw 'rectangle    0 , 0 ,  119 , 1871' \
-    -draw 'rectangle 1284 , 0 , 1403 ,  119' \
+    -fill '#C0C0C0' \
+    -draw "rectangle $X_ML  , 0 , $X_MR  , $Y_BOTTOM"       \
+    -draw "rectangle $X_CBL , 0 , $X_CBR , $Y_CBB"          \
     \
     -fill black \
-    -draw 'line    0 ,   0 , 1403 ,    0' \
-    -draw 'line  120 ,   0 ,  120 , 1871' \
-    -draw 'line  120 , 120 , 1403 ,  120' \
-    -draw 'line 1284 ,   0 , 1284 ,  120' \
-    basic-page.png
+    -draw "line $X_LEFT  , 0        , $X_RIGHT , 0"         \
+    -draw "line $X_MS    , 0        , $X_MS    , $Y_BOTTOM" \
+    -draw "line $X_LEFT  , $Y_TITLE , $X_RIGHT , $Y_TITLE"  \
+    -draw "line $X_CBS   , 0        , $X_CBS   , $Y_TITLE"  \
+    "${OF_PREFIX}basic-page${OF_SUFFIX}.png"
 
 ###############################################################################
 #
@@ -67,32 +256,63 @@ magick dots-50.png \
 # - Add smaller labels in the boxes across the top.
 # - Save the result as 'daily-work.png'.
 
-magick basic-page.png \
+if $LEFT_HAND
+then
+    X_DATE=$X_CBS                       # X: left edge of "Date" box
+    X_HOURS=$(( X_MS - W_HOURS ))       # X: left edge of "Hours" box
+    X_TIMES=$(( X_HOURS - W_TIMES ))    # X: left edge of "Times" box
+else
+    X_DATE=$X_LEFT                      # X: left edge of "Date" box
+    X_HOURS=$(( X_CBL - W_HOURS ))      # X: left edge of "Hours" box
+    X_TIMES=$(( X_HOURS - W_TIMES ))    # X: left edge of "Times" box
+fi
+
+X_CHSL=$(( X_LEFT + 1 ))                # X: left edge of column header grey box
+Y_CHST=$(( Y_TITLE + 1 ))               # Y: top of column header grey box
+Y_CHSB=$(( Y_TITLE + H_HEADER - 1 ))    # Y: bottom of column header grey box
+
+X_DONE=$X_LEFT                          # X: left edge of "Done" column
+X_TICKET=$(( X_DONE + W_DONE ))         # X: left edge of "Ticket" column
+X_REL=$(( X_TICKET + W_TICKET ))        # X: left edge of "Release" column
+X_DESC=$(( X_REL + W_REL ))             # X: left edge of "Description" column
+
+YL_UPPER=$(( Y_TITLE - 5 ))             # Y: tiny labels above title separator
+XL_DATE=$(( X_DATE + 5 ))               # X: tiny label "Date"
+XL_TIMES=$(( X_TIMES + 5 ))             # X: tiny label "Times"
+XL_HOURS=$(( X_HOURS + 5 ))             # X: tiny label "Hours"
+
+YL_LOWER=$(( Y_CHSB - 10 ))             # Y: labels in column headers
+XL_DONE=$(( X_LEFT + 5 ))               # X: label "Done"
+XL_TICKET=$(( X_TICKET + 5 ))           # X: label "Ticket"
+XL_REL=$(( X_REL + 5 ))                 # X: label "Release"
+XL_DESC=$(( X_DESC + 5 ))               # X: Label "Description"
+
+set_x magick "${OF_PREFIX}basic-page${OF_SUFFIX}.png" \
     \
     -fill '#E0E0E0' \
-    -draw 'rectangle 121 , 121 , 1403 , 169' \
+    -draw "rectangle $X_CHSL , $Y_CHST , $X_RIGHT , $Y_CHSB" \
     \
-    -fill '#808080' \
-    -draw 'line 740 , 60 , 1100 , 60' \
+    -fill '#C0C0C0' \
+    -draw "line $X_TIMES , $Y_TMID , $X_HOURS , $Y_TMID" \
     \
     -fill black \
-    -draw 'line  120 , 170 , 1403 ,  170' \
-    -draw 'line  220 , 120 ,  220 , 1871' \
-    -draw 'line  470 , 120 ,  470 , 1871' \
-    -draw 'line  670 , 120 ,  670 , 1871' \
-    -draw 'line  740 ,   0 ,  740 ,  120' \
-    -draw 'line 1100 ,   0 , 1100 ,  120' \
+    -draw "line $X_LEFT   , $Y_CHSB  , $X_RIGHT  , $Y_CHSB"   \
+    -draw "line $X_TICKET , $Y_TITLE , $X_TICKET , $Y_BOTTOM" \
+    -draw "line $X_REL    , $Y_TITLE , $X_REL    , $Y_BOTTOM" \
+    -draw "line $X_DESC   , $Y_TITLE , $X_DESC   , $Y_BOTTOM" \
+    -draw "line $X_TIMES  , 0        , $X_TIMES  , $Y_TITLE"  \
+    -draw "line $X_HOURS  , 0        , $X_HOURS  , $Y_TITLE"  \
     \
     -font 'Andale-Mono' \
     -pointsize 30 \
-    -draw 'text 125,155 "Done"' \
-    -draw 'text 225,155 "Time/Ticket"' \
-    -draw 'text 475,155 "Release"' \
-    -draw 'text 675,155 "Description"' \
+    -draw "text $XL_DONE   , $YL_LOWER \"Done\"" \
+    -draw "text $XL_TICKET , $YL_LOWER \"Time/Ticket\"" \
+    -draw "text $XL_REL    , $YL_LOWER \"Release\"" \
+    -draw "text $XL_DESC   , $YL_LOWER \"Description\"" \
     \
     -pointsize 12 \
-    -draw 'text  125,115 "Date"' \
-    -draw 'text  745,115 "Times"' \
-    -draw 'text 1105,115 "Hours"' \
+    -draw "text $XL_DATE  , $YL_UPPER \"Date\"" \
+    -draw "text $XL_TIMES , $YL_UPPER \"Times\"" \
+    -draw "text $XL_HOURS , $YL_UPPER \"Hours\"" \
     \
-    daily-work.png
+    "${OF_PREFIX}daily-work${OF_SUFFIX}.png"
