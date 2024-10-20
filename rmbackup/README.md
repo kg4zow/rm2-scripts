@@ -4,7 +4,7 @@ Backs up the raw files from a reMarkable tablet.
 
 Backups are gathered using `rsync` and stored in a designated "backup directory", which will have a `raw/` directory contianing the files from the tablet. Successive backups using the same directory will copy only the files which were updated since the previous backup.
 
-The program can optionally produce "archive" files from the raw files. These archives allow you to easily restore notebooks to the tablet (or to a different tablet). Archive files are "`.rmdoc`" files which can be uploaded using the built-in web browser (in tablet software 3.10 and later), and "`.rmn`" files which can be uploaded using RCU.
+The program can optionally produce "archive" files from the raw files. These archives allow you to easily restore notebooks to the tablet (or to a different tablet). Archive files are "`.rmdoc`" files which can be uploaded using the built-in web server (in tablet software 3.10 and later), and "`.rmn`" files which can be uploaded using RCU.
 
 If the tablet is connected via USB and the tablet's built-in web interface is enabled, the program can also download PDFs of the documents. When you do this, any pen strokes you may have added to the original file will become part of the PDF, and if you later upload the PDF back to a tablet, those pen strokes will not be edit-able.
 
@@ -18,7 +18,7 @@ The program *can* also run "`git commit`" and "`git push`" commands before finis
 
 The program itself was written in Perl on macOS and tested using Linux.
 
-It *might* also work on windows if you're able to set up the pre-requisites, but I don't have any windows machines to try it on. Nor do I have any interest in figuring it out. ([Here's a nickel, kid.](https://jms1.pub/heres-a-nickel-kid.jpg)  Get yourself a better computer.)
+It *might* also work on windows if you're able to set up the pre-requisites, but I don't have any windows machines to try it on. Nor do I have any interest in figuring it out. ([Here's a nickel, kid. Get yourself a better computer.](https://jms1.pub/heres-a-nickel-kid.jpg))
 
 ### Pre-requisites
 
@@ -246,6 +246,21 @@ After this, each additional time you run the same command, it will ...
 * Maybe run "`git push`" to push the commit to a remote server.
 
 
+## Delete Old Archive Files (added in v0.7)
+
+If you've been using an older version of `rmbackup` and upgrade to v0.7, the script will start removing old archive files (PDF, `.rmdoc`, and `.rmn`) for documents which were deleted or renamed. However, it only picks up on documents which were deleted or renamed *since the last time `rmbackup` was run*.
+
+If your directory has older archive files which need to be deleted, the easiest way to do this is to delete the `pdf/`, `rmdoc/`, and `rmn/` directories, and run `rmbackup` again.
+
+```
+cd $HOME/rmbackup/tablet1
+rm -r pdf rmdoc rmn
+rmbackup .
+```
+
+The script will see that the archive files don't exist, and will build (for `.rmdoc` or `.rmn`) or download (for PDF) the archive files automatically, but only for documents which currently exist on the tablet - which means all of your *old* archive files won't be there anymore. If the script does a git commit, that commit will include the deletion of these outdated archive files.
+
+
 # License
 
 The MIT License (MIT)
@@ -267,6 +282,11 @@ If you haven't already done so, I strongly recommend you set up an SSH key pair 
 I wrote [this page](https://remarkable.jms1.info/info/ssh.html) a few months ago, to explain how to set this up.
 
 # Changelog
+
+### 2024-10-14 - v0.7
+
+* Added code to delete archive files (PDF, `.rmdoc`, and `.rmn`) of documents which were renamed or deleted on the tablet since the previous `rmbackup`.
+    * Note that if your backup directory is a git repo, you can always `git checkout` an earlier commit where the archive file *did* exist.
 
 ### 2024-09-30 - v0.6
 
