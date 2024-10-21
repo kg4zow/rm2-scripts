@@ -1,4 +1,4 @@
-#!/usr/bin/env perl -w
+#!/usr/bin/env perl
 #
 # rm2-template-calendar
 # John Simpson <jms1@jms1.net> 2023-07-04
@@ -6,11 +6,13 @@
 # 2023-07-09 jms1 - added support for landscape mode, added command line
 #   options to choose which of the four images it should generate.
 #
+# 2024-10-20 jms1 - added options
+#
 ###############################################################################
 #
 # The MIT License (MIT)
 #
-# Copyright (C) 2023 John Simpson
+# Copyright (C) 2023-2024 John Simpson
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the “Software”),
@@ -43,12 +45,19 @@ use POSIX 'strftime' ;                  # cpan install POSIX
 use Time::Local qw( timegm_posix ) ;    # (normally installed with Perl itself)
 
 ########################################
-# reMarkable 2 screen attributes
+# Screen dimensions
 
-my $rm2_page_w      = 1404 ;    # page width
-my $rm2_page_h      = 1872 ;    # page height
-my $rm2_menu_w      = 120 ;     # width of menu and close button areas
-my $rm2_title_h     = 120 ;     # height of title area
+my $rm12_page_w     = 1404 ;    # page width
+my $rm12_page_h     = 1872 ;    # page height
+
+my $rmpp_page_w     = 1620 ;    # page width
+my $rmpp_page_h     = 2160 ;    # page height
+
+########################################
+# Other page dimensions
+
+my $the_menu_w      = 104 ;     # width of menu and close button areas
+my $the_title_h     = 120 ;     # height of title area
 
 ########################################
 # Calendar attributes
@@ -70,6 +79,8 @@ my $dom_size    = 24 ;          # Font size for day of month
 # Other globals
 
 my %opt         = () ;          # getopts()
+my $the_page_w  = 0 ;           # actual display width
+my $the_page_h  = 0 ;           # actual display height
 
 ###############################################################################
 #
@@ -84,12 +95,19 @@ $0 [options]
 
 Create a reMarkable 2 template for a simple monthly calendar.
 
+-p          Generate template with page size to match rMPP (1620x2160).
+            Default is to match rM1/rM2 (1404x1872).
+
 -l or -r    Left- or Right-handed. Default is Right-handed.
 
 -L or -P    Landscape or Portrait. Default is Portrait.
 
 -m ___      Month to pre-number. Must be "YYYY-MM" format (i.e. "2023-07")
             Default is no month, i.e. no pre-filled dates.
+
+-M ___      Specify the width of the menu bar on the side. Default is 104
+            to match current versions, however if you'll be using the template
+            with an older software version you may need 120.
 
 -o ___      Specify the name of the file to write. Default is 'CalendarMo.png'.
 
@@ -158,10 +176,10 @@ sub calendar_basic($$$)
     ########################################
     # Adjust page size for portrait/landscape mode
 
-    my $page_w  = $landscape ? $rm2_page_h : $rm2_page_w ;
-    my $page_h  = $landscape ? $rm2_page_w : $rm2_page_h ;
-    my $menu_w  = $rm2_menu_w ;
-    my $title_h = $rm2_title_h ;
+    my $page_w  = $landscape ? $the_page_h : $the_page_w ;
+    my $page_h  = $landscape ? $the_page_w : $the_page_h ;
+    my $menu_w  = $the_menu_w ;
+    my $title_h = $the_title_h ;
 
     ########################################
     # Adjust positions for left/right handedness
@@ -372,8 +390,14 @@ sub days_in_month($$)
 ###############################################################################
 ###############################################################################
 
-getopts( 'hlrLPo:m:' , \%opt ) ;
+getopts( 'hlrLPo:m:pM:' , \%opt ) ;
 $opt{'h'} && usage() ;
+
+########################################
+# Set page size
+
+$the_page_w = ( $opt{'p'} ? $rmpp_page_w : $rm12_page_w ) ;
+$the_page_h = ( $opt{'p'} ? $rmpp_page_h : $rm12_page_h ) ;
 
 ########################################
 # Left or right handed?
@@ -407,6 +431,11 @@ if ( $opt{'L'} )
 # Output filename
 
 my $outfile = ( $opt{'o'} || 'CalendarMo.png' ) ;
+
+########################################
+# Menu bar width
+
+$the_menu_w = ( $opt{'M'} || 104 ) ;
 
 ############################################################
 # If a month was specified, figure where the extra bits (which make it

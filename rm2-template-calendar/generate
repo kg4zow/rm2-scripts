@@ -2,6 +2,7 @@
 #
 # generate-images
 # jms1 2023-07-09
+# Last updated 2024-10-20
 #
 # - Run the script to generate the template images
 # - Create small versions of each image, to show in the README.md file
@@ -40,12 +41,24 @@ function make_small {
 ###############################################################################
 ###############################################################################
 
-./rm2-template-calendar -Ll -o L-CalendarMo-lh.png
-./rm2-template-calendar -Lr -o L-CalendarMo-rh.png
-./rm2-template-calendar -Pl -o P-CalendarMo-lh.png
-./rm2-template-calendar -Pr -o P-CalendarMo-rh.png
+mkdir -p rm12 rmpp
 
-make_small L-CalendarMo-lh.png
-make_small L-CalendarMo-rh.png
-make_small P-CalendarMo-lh.png
-make_small P-CalendarMo-rh.png
+./rm2-template-calendar    -Ll -o rm12/L-CalendarMo-lh.png
+./rm2-template-calendar    -Lr -o rm12/L-CalendarMo-rh.png
+./rm2-template-calendar    -Pl -o rm12/P-CalendarMo-lh.png
+./rm2-template-calendar    -Pr -o rm12/P-CalendarMo-rh.png
+
+./rm2-template-calendar -p -Ll -o rmpp/L-CalendarMo-lh.png
+./rm2-template-calendar -p -Lr -o rmpp/L-CalendarMo-rh.png
+./rm2-template-calendar -p -Pl -o rmpp/P-CalendarMo-lh.png
+./rm2-template-calendar -p -Pr -o rmpp/P-CalendarMo-rh.png
+
+make_small rm12/L-CalendarMo-lh.png
+make_small rm12/L-CalendarMo-rh.png
+make_small rm12/P-CalendarMo-lh.png
+make_small rm12/P-CalendarMo-rh.png
+
+make_small rmpp/L-CalendarMo-lh.png
+make_small rmpp/L-CalendarMo-rh.png
+make_small rmpp/P-CalendarMo-lh.png
+make_small rmpp/P-CalendarMo-rh.png
