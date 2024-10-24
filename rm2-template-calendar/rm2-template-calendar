@@ -3,10 +3,7 @@
 # rm2-template-calendar
 # John Simpson <jms1@jms1.net> 2023-07-04
 #
-# 2023-07-09 jms1 - added support for landscape mode, added command line
-#   options to choose which of the four images it should generate.
-#
-# 2024-10-20 jms1 - added options
+# 2024-10-23 jms1 - fixed a typo in the usage() message
 #
 ###############################################################################
 #
@@ -93,7 +90,7 @@ sub usage(;$)
     print <<EOF ;
 $0 [options]
 
-Create a reMarkable 2 template for a simple monthly calendar.
+Create a reMarkable template for a simple monthly calendar.
 
 -p          Generate template with page size to match rMPP (1620x2160).
             Default is to match rM1/rM2 (1404x1872).
