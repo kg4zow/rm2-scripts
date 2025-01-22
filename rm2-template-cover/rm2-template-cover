@@ -6,35 +6,148 @@
 # Create a simple "cover page" template
 #
 # 2023-07-09 jms1 - renamed script
-
-########################################
-# Page dimensions
 #
-# These values are correct for reMarkable tablets, only change if you're
-# making a cover image to fit some other device.
-
-PAGE_W=1404
-PAGE_H=1872
-
-########################################
-# Background colour. This can be anything ImageMagick recognizes, you can run
-# "magick -list color" to see a list of pre-defined colour names.
+# 2025-01-21 jms1 - added options for rMPP page size and colour depth,
+#   box size/position
 #
-# Examples: (these are all the same colour)
-# - "gray75"
-# - "#BFBFBF"
-# - "srgb(191,191,191)"
+###############################################################################
+#
+# The MIT License (MIT)
+#
+# Copyright (C) 2023-2025 John Simpson
+#
+# Permission is hereby granted, free of charge, to any person obtaining a
+# copy of this software and associated documentation files (the “Software”),
+# to deal in the Software without restriction, including without limitation
+# the rights to use, copy, modify, merge, publish, distribute, sublicense,
+# and/or sell copies of the Software, and to permit persons to whom the
+# Software is furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+#
+###############################################################################
 
+RMPP=false
 PAGE_BG="gray75"
-
-########################################
-# Box outer dimensions and Y position.
-# - X will be calculated so the box is centered on the page.
-
 BOX_W=900
 BOX_H=400
-
 BOX_Y=300
+
+###############################################################################
+
+function usage {
+    MSG="$*"
+
+    cat <<EOF
+$0 [OPTIONS] FILENAME
+
+Create a simple "cover page" template for reMarkable notebooks.
+
+-p      Generate a template for the rMPP, which is 1620x2160, 24-bit colour.
+        By default this will generate a template for the rM1/rM2, which is
+        1404x1872, 8-bit greyscale.
+
+-B ___  Set the background colour for the image. This can be any colour that
+        ImageMagick recognizes, run "magick -list color" for a list. Note
+        that templates for the rM1/rM2 will be 8-bit greyscale.
+        Default: $PAGE_BG
+
+-W ___  Set the width of the box, in pixels.
+        Default: $BOX_W
+
+-H ___  Set the height of the box, in pixels.
+        Default: $BOX_H
+
+-Y ___  Set the vertical position of the top of the box, in pixels.
+        Default: $BOX_Y
+
+-h      Show this help message.
+
+EOF
+
+    if [[ -n "$MSG" ]]
+    then
+        echo "$MSG"
+        exit 1
+    fi
+
+    exit 0
+}
+
+###############################################################################
+###############################################################################
+###############################################################################
+
+while getopts ':hpB:W:H:Y:' OPT
+do
+    case $OPT in
+        h)  usage
+            ;;
+        p)  RMPP=true
+            ;;
+        B)  PAGE_BG="$OPTARG"
+            ;;
+        W)  BOX_W="$OPTARG"
+            ;;
+        H)  BOX_H="$OPTARG"
+            ;;
+        Y)  BOX_Y="$OPTARG"
+            ;;
+        *)  usage "ERROR: unknown option '-$OPTARG'"
+            ;;
+    esac
+done
+
+shift $((OPTIND-1))
+
+OUTFILE="$1"
+if [[ -z "$OUTFILE" ]]
+then
+    usage
+fi
+
+########################################
+# Make sure box size/position options are digits only
+
+if [[ ! $BOX_W =~ ^[0-9]+$ ]]
+then
+    usage "ERROR: -W requires digits only"
+fi
+
+if [[ ! $BOX_H =~ ^[0-9]+$ ]]
+then
+    usage "ERROR: -H requires digits only"
+fi
+
+if [[ ! $BOX_Y =~ ^[0-9]+$ ]]
+then
+    usage "ERROR: -Y requires digits only"
+fi
+
+########################################
+# Set page dimensions for the tablet type
+
+if $RMPP
+then
+    PAGE_W=1620
+    PAGE_H=2160
+    TYPE="TrueColor"
+    DEPTH="24"
+else
+    PAGE_W=1404
+    PAGE_H=1872
+    TYPE="GrayScale"
+    DEPTH="8"
+fi
 
 ########################################
 # Calculate the boxes' corner positions.
@@ -61,12 +174,30 @@ DX2=$(( CX2 - 1 ))
 DY2=$(( CY2 - 1 ))
 
 ########################################
+# Make sure the box doesn't extend beyond the page
+
+if (( $AX1 < 0 ))
+then
+    usage "ERROR: the box is too wide for the page"
+fi
+
+if (( $AY1 < 0 ))
+then
+    usage "ERROR: the top of box is above the top of the page"
+fi
+
+if (( $AY2 >= $PAGE_H ))
+then
+    usage "ERROR: the bottom of the box is below the bottom of the page"
+fi
+
+########################################
 # Do it
 
-rm -f cover-simple.png
+rm -f "$OUTFILE"
 
 magick \
-    -type GrayScale -depth 8 -size "${PAGE_W}x${PAGE_H}" "xc:${PAGE_BG}" \
+    -type "$TYPE" -depth "$DEPTH" -size "${PAGE_W}x${PAGE_H}" "xc:${PAGE_BG}" \
     -fill black \
     -draw "rectangle $AX1 $AY1 $AX2 $AY2" \
     -fill $PAGE_BG \
@@ -75,4 +206,4 @@ magick \
     -draw "rectangle $CX1 $CY1 $CX2 $CY2" \
     -fill white \
     -draw "rectangle $DX1 $DY1 $DX2 $DY2" \
-    cover-simple.png
+    "$OUTFILE"
