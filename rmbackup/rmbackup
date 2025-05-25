@@ -3,13 +3,13 @@
 # rmbackup
 # John Simpson <jms1@jms1.net> 2024-04-21
 #
-# Last updated 2024-10-14
+# Last updated 2025-05-25
 #
 ###############################################################################
 #
 # The MIT License (MIT)
 #
-# Copyright (C) 2024 John Simpson
+# Copyright (C) 2024-2025 John Simpson
 #
 # Permission is hereby granted, free of charge, to any person obtaining a
 # copy of this software and associated documentation files (the "Software"),
@@ -42,7 +42,7 @@ use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
 use JSON ;
 use LWP::UserAgent ;
 
-my $VERSION = '0.7 2024-10-14' ;
+my $VERSION = '0.7.1 2025-05-25' ;
 
 ########################################
 # List of directories to be sync'ed from the tablet
@@ -613,7 +613,7 @@ sub read_names()
 {
     %last_name = () ;
 
-    if ( open( N , '<' , 'names.txt' ) )
+    if ( open( N , '<' , '$out_dir/names.txt' ) )
     {
         while ( my $line = <N> )
         {
@@ -634,8 +634,8 @@ sub read_names()
 
 sub write_names()
 {
-    open( N , '>' , 'names.txt' )
-        or fail "ERROR: can't create \"generated.txt\": $!\n" ;
+    open( N , '>' , '$out_dir/names.txt' )
+        or fail "ERROR: can't create \"$out_dir/names.txt\": $!\n" ;
 
     for my $uuid ( sort keys %this_name )
     {
