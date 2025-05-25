@@ -42,7 +42,7 @@ use Getopt::Long qw( GetOptionsFromArray :config require_order bundling ) ;
 use JSON ;
 use LWP::UserAgent ;
 
-my $VERSION = '0.7.1 2025-05-25' ;
+my $VERSION = '0.7.2 2025-05-25' ;
 
 ########################################
 # List of directories to be sync'ed from the tablet
@@ -613,7 +613,7 @@ sub read_names()
 {
     %last_name = () ;
 
-    if ( open( N , '<' , '$out_dir/names.txt' ) )
+    if ( open( N , '<' , "$out_dir/names.txt" ) )
     {
         while ( my $line = <N> )
         {
@@ -634,7 +634,7 @@ sub read_names()
 
 sub write_names()
 {
-    open( N , '>' , '$out_dir/names.txt' )
+    open( N , '>' , "$out_dir/names.txt" )
         or fail "ERROR: can't create \"$out_dir/names.txt\": $!\n" ;
 
     for my $uuid ( sort keys %this_name )
