@@ -1279,9 +1279,9 @@ if ( $git_commit )
 {
     blueline "Verifying that the backup directory contains a git repo" ;
 
-    if ( ! -d "$out_dir/.git" )
+    if ( 0 != system("cd \"$out_dir\" && git rev-parse --is-inside-work-tree >/dev/null 2>&1") )
     {
-        fail "ERROR: git_commit is true but '$out_dir' is not a git repository" ;
+        fail "ERROR: git_commit is true but '$out_dir' is not part of a git repository" ;
     }
 }
 elsif ( $git_push )
